@@ -20,6 +20,41 @@ def pretty_print(messages):
     print()
 
 
+# Pretty print messages with file annotations.
+def pretty_print_annotated(messages):
+    print("# Messages")
+    for m in messages:
+        annotate_message(m)
+        print(f"{m.role}: {m.content[0].text.value}")
+    print()
+
+
+# Modify message content to reference file annotations.
+# NOTE: Annotations used to have a "quote" attribute (file_citation.quote) that isn't currently working.
+def annotate_message(message):
+    # Extract the message content
+    message_content = message.content[0].text
+    annotations = message_content.annotations
+    citations = []
+    # Iterate over the annotations and add footnotes
+    for index, annotation in enumerate(annotations):
+        # Replace the text with a footnote
+        message_content.value = message_content.value.replace(annotation.text, f' [{index}]')
+        # Gather citations based on annotation attributes
+        if (file_citation := getattr(annotation, 'file_citation', None)):
+            print(file_citation)
+            cited_file = client.files.retrieve(file_citation.file_id)
+            citations.append(f'[{index}] File ID {cited_file}')
+        elif (file_path := getattr(annotation, 'file_path', None)):
+            cited_file = client.files.retrieve(file_path.file_id)
+            citations.append(f'[{index}] Click <here> to download {cited_file.filename}')
+            # Note: File download functionality not implemented above for brevity
+    # Add footnotes to the end of the message before displaying to user
+    message_content.value += '\n' + '\n'.join(citations)
+    message.content[0].text.value = message_content.value
+
+
+
 ## FUNCTIONS THAT WAIT FOR PROCESSES TO COMPLETE
 def wait_on_run(run, thread):
     while run.status == "queued" or run.status == "in_progress":
@@ -202,7 +237,12 @@ thread, run = create_thread_and_run(
     "What does the book have to say about Edward Bernays?"
 )
 run = wait_on_run(run, thread)
-pretty_print(get_response(thread))
+pretty_print_annotated(get_response(thread))
+
+
+
+
+
 
 # Enable function calling.
 function_json = {
