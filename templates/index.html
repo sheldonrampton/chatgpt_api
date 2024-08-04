@@ -25,7 +25,7 @@ async function sendMessage() {
     const data = await response.json();
     const chatHistory = document.getElementById('chat-history');
     chatHistory.innerHTML += `<p><strong>You:</strong> ${userInput}</p>`;
-    chatHistory.innerHTML += `<p><strong>Bot:</strong> ${data.response}</p>`;
+    chatHistory.innerHTML += `<p><strong>Bot:</strong> ${data.response.replace(/\n/g, '<br>')}</p>`;
     document.getElementById('user-input').value = '';
 }
     </script>

@@ -12,6 +12,10 @@
     margin-bottom: 20px;
 }
 
+#chat-history p {
+    white-space: pre-wrap; /* Ensures that whitespace and line breaks are preserved */
+}
+
 #user-input {
     width: 80%;
     padding: 10px;
