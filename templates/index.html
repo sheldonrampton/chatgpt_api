@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div id="chat-container">
+        <div id="chat-history"></div>
+        <input type="text" id="user-input" placeholder="Type your message...">
+        <button onclick="sendMessage()">Send</button>
+    </div>
+    <script>
+async function sendMessage() {
+    const userInput = document.getElementById('user-input').value;
+    const response = await fetch('/chat', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ message: userInput })
+    });
+    const data = await response.json();
+    const chatHistory = document.getElementById('chat-history');
+    chatHistory.innerHTML += `<p><strong>You:</strong> ${userInput}</p>`;
+    chatHistory.innerHTML += `<p><strong>Bot:</strong> ${data.response}</p>`;
+    document.getElementById('user-input').value = '';
+}
+    </script>
+</body>
+</html>

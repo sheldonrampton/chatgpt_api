@@ -21,6 +21,7 @@ For testing the ChatGPT API
 * embedding_gem_wiki: creates embeddings based on the first 10,000 articles in the GEM wiki.
 * embedding_test.py: creates a very simple embedding based on a single client message.
 * embedding_wikipedia.py: Generates embeddings from the GEM wiki for the category "Wisconsin"
+* flask_chatgpt.py: a simple proof-of-concept Flask app that uses the ChatGPT API to respond to users' requests. Uses files in the "static" and "templates" subdirectories
 * function_calling.py: creates a chat completion (without an assistant) that calls a couple of functions to retrieve the data needed for its answers.
 * hello.py: "Hello, world" test of Flask library
 * json_test.py: uses the chat API to return JSON
