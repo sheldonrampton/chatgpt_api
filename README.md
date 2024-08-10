@@ -20,7 +20,7 @@ For testing the ChatGPT API
 * completion_test.py: another very simple chat completion
 * embedding_gem_wiki: creates embeddings based on the first 10,000 articles in the GEM wiki (not the category: Wisconsin).
 * embedding_test.py: creates a very simple embedding based on a single client message.
-* embedding_wikipedia.py: Generates embeddings from the GEM wiki for the category "Wisconsin"
+* embedding_gem_wisconsin.py: Generates embeddings from the GEM wiki for the category "Wisconsin"
 * flask_chatgpt.py: a simple proof-of-concept Flask app that uses the ChatGPT API to respond to users' requests. Uses files in the "static" and "templates" subdirectories
 * function_calling.py: creates a chat completion (without an assistant) that calls a couple of functions to retrieve the data needed for its answers.
 * hello.py: "Hello, world" test of Flask library
@@ -32,6 +32,7 @@ For testing the ChatGPT API
 * question_answering_embeddings.py: The beginnings of a script that adds knowledge to ChatGPT using embeddings so it can answer specialized questions. This script doesn't actually create embeddings. It just creates a query with the actual text of a Wikipedia article included in the query.
 * question_answering_embeddings2.py: Completion of the script to answer questions with the embeddings created by embedding_wikipedia.py.
 * question_answering_gem.py: Answers questions based on GEM wiki-based embeddings.
+* question_answering_embeddings_gem_flask.py: Answers questions via a Flask-power chat web page, based on the 10,000 GEM wiki embeddings generated using embedding_gem_wiki.py.
 * quickstart.py: a very simple chat completion
 * vision.py: a simple example of using the API to inspect an image from its URL and describe it
 * vision2.py: this time it encodes a local image and shares that via the API
