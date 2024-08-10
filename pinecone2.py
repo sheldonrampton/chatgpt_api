@@ -42,6 +42,7 @@ print(article_df.head())
 # Read vectors from strings back into a list
 article_df['title_vector'] = article_df.title_vector.apply(literal_eval)
 article_df['content_vector'] = article_df.content_vector.apply(literal_eval)
+# article_df['metadata'] = { "title": article_df.title, "url": article_df.content }
 
 # Set vector_id to be a string
 article_df['vector_id'] = article_df['vector_id'].apply(str)
@@ -85,7 +86,10 @@ if index_name in pinecone.list_indexes():
     pinecone.delete_index(index_name)
     
 # Creates new index
-spec = ServerlessSpec(cloud="aws", region="us-east-1")
+spec = ServerlessSpec(
+    cloud="aws",
+    region="us-east-1"
+)
 
 # check if index already exists (it shouldn't if this is your first run)
 if index_name not in pinecone.list_indexes().names():
@@ -111,12 +115,22 @@ print(pinecone.list_indexes())
 # Upsert content vectors in content namespace - this can take a few minutes
 print("Uploading vectors to content namespace..")
 for batch_df in df_batcher(article_df):
-    index.upsert(vectors=zip(batch_df.vector_id, batch_df.content_vector), namespace='content')
+    index.upsert(vectors=zip(
+        batch_df.vector_id, batch_df.content_vector,
+        [{**a, **b} for a, b in zip(
+            [{ "title": t } for t in batch_df.title ],
+            [{ "url": u } for u in batch_df.url ])
+        ]
+    ), namespace='content')
 
 # Upsert title vectors in title namespace - this can also take a few minutes
 print("Uploading vectors to title namespace..")
 for batch_df in df_batcher(article_df):
-    index.upsert(vectors=zip(batch_df.vector_id, batch_df.title_vector), namespace='title')
+    index.upsert(vectors=zip(
+        batch_df.vector_id, batch_df.title_vector,
+        [{ "title": t } for t in batch_df.title ],
+        [{ "url": u } for u in batch_df.url ])
+    ), namespace='title')
 
 # Check index size for each namespace to confirm all of our docs have loaded
 print(index.describe_index_stats())

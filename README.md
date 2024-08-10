@@ -25,6 +25,9 @@ For testing the ChatGPT API
 * function_calling.py: creates a chat completion (without an assistant) that calls a couple of functions to retrieve the data needed for its answers.
 * hello.py: "Hello, world" test of Flask library
 * json_test.py: uses the chat API to return JSON
+* pinecone1.py: A simple example of using the Pinecone API to create an index.
+* pinecone2.py: An example of using the Pinecone API to store embeddings with title and URL metadata and search them for similarity to a query string.
+* pinecone3.py: An example of using the Pinecone API to search previously-saved embeddings and retrieve them including their metadata.
 * mwclient_test.py: tests the allpages method in the Mediawiki client library
 * question_answering_embeddings.py: The beginnings of a script that adds knowledge to ChatGPT using embeddings so it can answer specialized questions.
 * question_answering_embeddings2.py: Completion of the script to answer questions with embeddings.
