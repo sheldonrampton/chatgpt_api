@@ -16,11 +16,11 @@ client = OpenAI(
 
 # get Wikipedia pages about the 2022 Winter Olympics
 
-CATEGORY_TITLE = "Category:2022 Winter Olympics"
-WIKI_SITE = "en.wikipedia.org"
+# CATEGORY_TITLE = "Category:2022 Winter Olympics"
+# WIKI_SITE = "en.wikipedia.org"
 
-# CATEGORY_TITLE = "Category:Wisconsin"
-# WIKI_SITE = "www.gem.wiki"
+CATEGORY_TITLE = "Category:Wisconsin"
+WIKI_SITE = "www.gem.wiki"
 
 
 def titles_from_category(
@@ -387,6 +387,6 @@ df = pd.DataFrame({"text": wikipedia_strings, "embedding": embeddings})
 
 # save document chunks and embeddings
 
-SAVE_PATH = "data/winter_olympics_2022.csv"
+SAVE_PATH = "data/gem_wisconsin.csv"
 
 df.to_csv(SAVE_PATH, index=False)
