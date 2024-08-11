@@ -37,6 +37,7 @@ For testing the ChatGPT API
 * question_answering_embeddings_gem.py: Answers questions based on GEM wiki-based embeddings generated in a CSV file in embedding_gem_wiki.py.
 * question_answering_embeddings_gem_flask.py: Answers questions via a Flask-power chat web page, based on the 10,000 GEM wiki embeddings generated using embedding_gem_wiki.py.
 * question_answering_wisconsin_sqlite.py: Answers questions with the embeddings created by embedding_gem_wisconsin.py. Uses the embeddings in Pinecone and uses sqlite to look up the article segments.
+* question_answering_wi_pinecone_sqlite_flask.py: Runs a Flask-powered chatbot that answers questions with the embeddings created by embedding_gem_wisconsin.py. Uses the embeddings in Pinecone and uses sqlite to look up the article segments.
 * quickstart.py: a very simple chat completion
 * vision.py: a simple example of using the API to inspect an image from its URL and describe it
 * vision2.py: this time it encodes a local image and shares that via the API
