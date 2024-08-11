@@ -20,7 +20,7 @@ For testing the ChatGPT API
 * completion_test.py: another very simple chat completion
 * embedding_gem_wiki: creates embeddings based on the first 10,000 articles in the GEM wiki (not the category: Wisconsin).
 * embedding_gem_wisconsin.py: Generates embeddings from the GEM wiki for the category "Wisconsin"
-* embedding_gem_wisconsin_simpledb.py: Generates embeddings from the GEM wiki for the category "Wisconsin," saves the embeddings in Pinecone, and saves the article segments in SimpleDB.
+* embedding_gem_wisconsin_sqlite.py: Generates embeddings from the GEM wiki for the category "Wisconsin," saves the embeddings in Pinecone, and saves the article segments in SQLite.
 * embedding_test.py: creates a very simple embedding based on a single client message.
 * flask_chatgpt.py: a simple proof-of-concept Flask app that uses the ChatGPT API to respond to users' requests. Uses files in the "static" and "templates" subdirectories
 * function_calling.py: creates a chat completion (without an assistant) that calls a couple of functions to retrieve the data needed for its answers.
@@ -36,6 +36,7 @@ For testing the ChatGPT API
 * question_answering_embeddings2_flask.py: Loads embeddings from a CSV file and uses them in a Flask-powered chatbot that can answer questions.
 * question_answering_embeddings_gem.py: Answers questions based on GEM wiki-based embeddings generated in a CSV file in embedding_gem_wiki.py.
 * question_answering_embeddings_gem_flask.py: Answers questions via a Flask-power chat web page, based on the 10,000 GEM wiki embeddings generated using embedding_gem_wiki.py.
+* question_answering_wisconsin_sqlite.py: Answers questions with the embeddings created by embedding_gem_wisconsin.py. Uses the embeddings in Pinecone and uses sqlite to look up the article segments.
 * quickstart.py: a very simple chat completion
 * vision.py: a simple example of using the API to inspect an image from its URL and describe it
 * vision2.py: this time it encodes a local image and shares that via the API
