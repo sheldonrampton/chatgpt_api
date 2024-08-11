@@ -1,4 +1,10 @@
-# https://platform.openai.com/docs/guides/chat-completions
+"""
+chat_completion.py: a very simple chat completion
+
+For more info see:
+https://platform.openai.com/docs/guides/chat-completions
+"""
+
 from openai import OpenAI
 
 client = OpenAI(

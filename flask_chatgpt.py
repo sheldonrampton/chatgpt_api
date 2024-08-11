@@ -1,3 +1,10 @@
+"""
+* flask_chatgpt.py:
+a simple proof-of-concept Flask app that uses the ChatGPT API
+to respond to users' requests.
+Uses files in the "static" and "templates" subdirectories.
+"""
+
 from flask import Flask, request, jsonify, render_template
 from openai import OpenAI
 

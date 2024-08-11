@@ -1,4 +1,11 @@
-# https://platform.openai.com/docs/guides/vision
+"""
+vision.py:
+a simple example of using the API to inspect an image from its URL and describe it
+
+For more information:
+https://platform.openai.com/docs/guides/vision
+"""
+
 from openai import OpenAI
 
 client = OpenAI()

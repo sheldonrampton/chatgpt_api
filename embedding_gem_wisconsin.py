@@ -1,4 +1,10 @@
-# https://cookbook.openai.com/examples/embedding_wikipedia_articles_for_search
+"""
+embedding_gem_wisconsin.py:
+Generates embeddings from the GEM wiki for the category "Wisconsin"
+
+For more information, see:
+https://cookbook.openai.com/examples/embedding_wikipedia_articles_for_search
+"""
 
 # imports
 import mwclient  # for downloading example Wikipedia articles

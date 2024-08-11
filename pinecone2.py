@@ -1,4 +1,11 @@
-# https://cookbook.openai.com/examples/vector_databases/pinecone/using_pinecone_for_embeddings_search
+"""
+* pinecone2.py:
+An example of using the Pinecone API to store embeddings with title and URL metadata
+and search them for similarity to a query string.
+
+For more information:
+https://cookbook.openai.com/examples/vector_databases/pinecone/using_pinecone_for_embeddings_search
+"""
 
 from openai import OpenAI
 from typing import List, Iterator

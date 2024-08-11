@@ -1,3 +1,7 @@
+"""
+embedding_test.py: creates a very simple embedding based on a single client message.
+"""
+
 from openai import OpenAI
 
 client = OpenAI(

@@ -1,4 +1,9 @@
-# https://platform.openai.com/docs/guides/vision
+"""
+vision2.py: this time it encodes a local image and shares that via the API
+
+For more information:
+https://platform.openai.com/docs/guides/vision
+"""
 
 # Encodes an image and submits it to the API for interpretation.
 

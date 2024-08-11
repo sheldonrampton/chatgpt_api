@@ -1,4 +1,11 @@
-# https://cookbook.openai.com/examples/question_answering_using_embeddings
+"""
+question_answering_embeddings_gem_flask.py:
+Answers questions via a Flask-power chat web page,
+based on the 10,000 GEM wiki embeddings generated using embedding_gem_wiki.py.
+
+For more information:
+https://cookbook.openai.com/examples/question_answering_using_embeddings
+"""
 
 # imports
 from flask import Flask, request, jsonify, render_template

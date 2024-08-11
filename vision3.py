@@ -1,4 +1,9 @@
-# https://platform.openai.com/docs/guides/vision
+"""
+vision3.py: uses the API to compare two different images
+
+For more information:
+https://platform.openai.com/docs/guides/vision
+"""
 
 # Encodes an image and submits it to the API for interpretation.
 

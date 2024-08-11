@@ -1,4 +1,12 @@
-# https://cookbook.openai.com/examples/question_answering_using_embeddings
+"""
+* question_answering_embeddings2.py:
+Completion of the script to answer questions with the embeddings
+created by embedding_wikipedia.py. Loads the embeddings from a
+CSV file and uses them to answer a few questions.
+
+For more information:
+https://cookbook.openai.com/examples/question_answering_using_embeddings
+"""
 
 # imports
 import ast  # for converting embeddings saved as strings back to arrays

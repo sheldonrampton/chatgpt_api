@@ -1,4 +1,11 @@
-# https://cookbook.openai.com/examples/question_answering_using_embeddings
+"""
+question_answering_embeddings_gem.py:
+Answers questions based on GEM wiki-based embeddings generated in a CSV
+file in embedding_gem_wiki.py
+
+For more information:
+https://cookbook.openai.com/examples/question_answering_using_embeddings
+"""
 
 # imports
 import ast  # for converting embeddings saved as strings back to arrays

@@ -1,4 +1,7 @@
-# https://cookbook.openai.com/examples/embedding_wikipedia_articles_for_search
+"""
+mwclient_test.py:
+tests the allpages method in the mwclient library for accessing Mediawiki sites via their API.
+"""
 
 # imports
 import mwclient  # for downloading example Wikipedia articles

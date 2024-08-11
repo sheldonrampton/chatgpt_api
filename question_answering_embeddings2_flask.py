@@ -1,4 +1,11 @@
-# https://cookbook.openai.com/examples/question_answering_using_embeddings
+"""
+question_answering_embeddings2_flask.py:
+Loads embeddings from a CSV file and uses them in a Flask-powered
+chatbot that can answer questions.
+
+For more info:
+https://cookbook.openai.com/examples/question_answering_using_embeddings
+"""
 
 # imports
 from flask import Flask, request, jsonify, render_template

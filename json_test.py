@@ -1,4 +1,10 @@
-# https://platform.openai.com/docs/guides/vision
+"""
+* json_test.py: uses the chat API to return JSON
+
+For more information see:
+https://platform.openai.com/docs/guides/vision
+"""
+
 from openai import OpenAI
 
 client = OpenAI()

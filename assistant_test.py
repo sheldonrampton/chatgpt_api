@@ -1,3 +1,5 @@
+# assistant_test.py: a very simple assistant.
+
 from openai import OpenAI
 
 client = OpenAI(

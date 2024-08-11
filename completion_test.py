@@ -1,3 +1,7 @@
+"""
+completion_test.py: another very simple chat completion
+"""
+
 from openai import OpenAI
 
 client = OpenAI(

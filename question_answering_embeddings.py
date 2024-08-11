@@ -1,4 +1,14 @@
-# https://cookbook.openai.com/examples/question_answering_using_embeddings
+"""
+* question_answering_embeddings.py:
+The beginnings of a script that adds knowledge to ChatGPT
+using embeddings so it can answer specialized questions.
+This script doesn't actually create embeddings.
+It just creates a query with the actual text of a Wikipedia article
+included in the query.
+
+For more information see:
+https://cookbook.openai.com/examples/question_answering_using_embeddings
+"""
 
 # imports
 import ast  # for converting embeddings saved as strings back to arrays

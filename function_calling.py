@@ -1,4 +1,11 @@
-# https://platform.openai.com/docs/guides/function-calling
+"""
+* function_calling.py:
+creates a chat completion (without an assistant)
+that calls a couple of functions to retrieve the data needed for its answers.
+
+For more information see:
+https://platform.openai.com/docs/guides/function-calling
+"""
 
 # Uses the OpenAI function calling feature.
 

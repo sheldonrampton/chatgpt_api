@@ -1,4 +1,17 @@
-# https://cookbook.openai.com/examples/assistants_api_overview_python
+"""
+assistant_test2.py: a more complicated assistant,
+with comments and output dumps showing the state of the various objects
+created by the API: agents, messages, etc.
+  * creates a basic agent that answers queries
+  * adds a code interpreter tool
+  * adds a file_search tool and searches "Trust Us, We're Experts" to answer questions
+  * parses annotations in the reply
+  * adds a function calling tool that lets the assistant create a quiz, submit it to the user, and grade the answers.
+  * displays JSON of objects include the assistant, runs, threads, messages, run steps, responses
+
+For more info see:
+https://cookbook.openai.com/examples/assistants_api_overview_python
+"""
 
 from openai import OpenAI
 import json

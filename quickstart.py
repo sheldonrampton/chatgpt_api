@@ -1,4 +1,9 @@
-# https://platform.openai.com/docs/quickstart
+"""
+quickstart.py a very simple chat completion
+
+For more information:
+https://platform.openai.com/docs/quickstart
+"""
 
 from openai import OpenAI
 import json

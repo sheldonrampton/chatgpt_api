@@ -1,3 +1,7 @@
+"""
+* pinecone1.py: A simple example of using the Pinecone API to create an index.
+"""
+
 from pinecone import Pinecone, ServerlessSpec
 import time
 import pandas as pd
