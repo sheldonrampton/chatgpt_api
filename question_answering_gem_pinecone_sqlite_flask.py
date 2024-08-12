@@ -1,7 +1,7 @@
 """
-question_answering_wi_pinecone_sqlite_flask.py:
+question_answering_gem_pinecone_sqlite_flask.py:
 Runs a Flask-powered chatbot that answers questions with the embeddings
-created by embedding_gem_wisconsin.py. Uses the embeddings in
+created by embedding_gem_pinecone_sqlite.py. Uses the embeddings in
 Pinecone and uses sqlite to look up the article segments.
 
 To run:
@@ -44,7 +44,8 @@ client = OpenAI(
 
 pinecone_api_key = os.environ.get('PINECONE_API_KEY')
 pinecone = Pinecone(api_key=pinecone_api_key)
-index_name = 'gem-wiki-test'
+# index_name = 'gem-wiki-test'
+index_name = 'gem-wiki-10000'
 # connect to index
 index = pinecone.Index(index_name)
 
@@ -183,7 +184,7 @@ def chat():
     if print_message:
         print(message)
     messages = [
-        {"role": "system", "content": "You answer questions about sustainable energy in Wisconsin."},
+        {"role": "system", "content": "You answer questions about sustainable energy and other activities related to climate change and global warming."},
         {"role": "user", "content": message},
     ]
     response = client.chat.completions.create(
