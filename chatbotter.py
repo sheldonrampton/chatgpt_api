@@ -465,7 +465,6 @@ def upsert_data(df):
     conn.commit()
     # conn.close()
 
-
     # Check whether the index with the same name already exists - if so, delete it
     if index_name in pinecone.list_indexes():
         pinecone.delete_index(index_name)
@@ -522,20 +521,33 @@ def upsert_data(df):
     print(index.describe_index_stats())
 
 
-wiki_strings, urls = compile_wiki_strings()
-df = compile_embeddings(wiki_strings, urls)
-upsert_data(df)
+def get_article_chunk(unique_id):
+    conn = sqlite3.connect(SQLITE_DB)
+    cursor = conn.cursor()
+    # SQL query to retrieve the row with the specified unique_id
+    query = "SELECT title, url, content FROM ArticleChunks WHERE unique_id = ?"
+    try:
+        # Execute the query and fetch the row
+        cursor.execute(query, (unique_id, ))
+        row = cursor.fetchone()
+        conn.close()
 
-index = pinecone.Index(index_name)
+        # Check if a row was found
+        if row:
+            return row
+        else:
+            print(f"No row found with unique_id = {unique_id}")
+            return None
+    except sqlite3.Error as e:
+        print(f"An error occurred: {e}")
+        return None
 
-# Now we'll create dictionaries mapping vector IDs to their outputs so we can retrieve the text for our search results
-text_mapped = dict(zip(df.vector_id,df.text))
-title_mapped = dict(zip(df.vector_id,df.title))
 
 def query_article(query, namespace, top_k=5):
     '''Queries an article using its title in the specified
      namespace and prints results.'''
 
+    index = pinecone.Index(index_name)
     # Use the OpenAI client to create vector embeddings based on the title column
     res = client.embeddings.create(input=[query], model=EMBEDDING_MODEL)
     embedded_query = res.data[0].embedding
@@ -556,10 +568,9 @@ def query_article(query, namespace, top_k=5):
     ids = [res.id for res in matches]
     scores = [res.score for res in matches]
     df = pd.DataFrame({'id':ids, 
-                       'score':scores,
-                       'text': [text_mapped[_id] for _id in ids],
-                       'title': [title_mapped[_id] for _id in ids],
+                       'score':scores
                        })
+    df['title'], df['url'], df['content'] = zip(*df['id'].apply(lambda x: get_article_chunk(x)))
     
     counter = 0
     for k,v in df.iterrows():
@@ -570,6 +581,10 @@ def query_article(query, namespace, top_k=5):
 
     return df
 
+
+wiki_strings, urls = compile_wiki_strings()
+df = compile_embeddings(wiki_strings, urls)
+upsert_data(df)
 
 query_output = query_article('Clean Coal','content')
 print(query_output)
