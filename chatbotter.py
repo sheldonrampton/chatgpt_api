@@ -92,8 +92,6 @@ def list_of_titles(
     return titles, urls
 
 
-
-
 def all_subsections_from_section(
     section: mwparserfromhell.wikicode.Wikicode,
     parent_titles: list[str],
@@ -370,77 +368,6 @@ def generate_vector_id(text: str) -> str:
     return hash_object.hexdigest()
 
 
-pages = site.allpages()
-titles, urls = list_of_titles(pages, limit=allpages_limit)
-# split pages into sections
-# may take ~1 minute per 100 articles
-wikipedia_sections = []
-for title in titles:
-    wikipedia_sections.extend(all_subsections_from_title(title))
-print(f"Found {len(wikipedia_sections)} sections in {len(titles)} pages.")
-wikipedia_sections = [clean_section(ws) for ws in wikipedia_sections]
-original_num_sections = len(wikipedia_sections)
-wikipedia_sections = [ws for ws in wikipedia_sections if keep_section(ws)]
-print(f"Filtered out {original_num_sections-len(wikipedia_sections)} sections, leaving {len(wikipedia_sections)} sections.")
-# print example data
-for ws in wikipedia_sections[:5]:
-    print(ws[0])
-    print(ws[1][:77] + "...")
-    print()
-# split sections into chunks
-MAX_TOKENS = 1600
-wikipedia_strings = []
-for section in wikipedia_sections:
-    wikipedia_strings.extend(split_strings_from_subsection(section, max_tokens=MAX_TOKENS))
-
-print(f"{len(wikipedia_sections)} Wikipedia sections split into {len(wikipedia_strings)} strings.")
-
-
-# print example data
-print(wikipedia_strings[1])
-
-
-BATCH_SIZE = 1000  # you can submit up to 2048 embedding inputs per request
-
-embeddings = []
-for batch_start in range(0, len(wikipedia_strings), BATCH_SIZE):
-    batch_end = batch_start + BATCH_SIZE
-    batch = wikipedia_strings[batch_start:batch_end]
-    print(f"Batch {batch_start} to {batch_end-1}")
-    response = client.embeddings.create(model=EMBEDDING_MODEL, input=batch)
-    for i, be in enumerate(response.data):
-        assert i == be.index  # double check embeddings are in same order as input
-    batch_embeddings = [e.embedding for e in response.data]
-    embeddings.extend(batch_embeddings)
-
-df = pd.DataFrame({"text": wikipedia_strings, "embedding": embeddings})
-df["title"] = df['text'].apply(get_first_line)
-df["url"] = df['title'].apply(get_url)
-df["vector_id"] = df['text'].apply(generate_vector_id)
-
-for value in df['title']:
-    print(value)
-for value in df['url']:
-    print(value)
-for value in df['vector_id']:
-    print(value)
-
-conn = sqlite3.connect(SQLITE_DB)
-c = conn.cursor()
-c.execute('''
-CREATE TABLE IF NOT EXISTS ArticleChunks (
-    unique_id TEXT PRIMARY KEY,
-    title TEXT,
-    content TEXT,
-    url TEXT
-)
-''')
-conn.commit()
-conn.close()
-
-
-
-
 # Models a simple batch generator that make chunks out of an input DataFrame
 class BatchGenerator:
     
@@ -465,62 +392,139 @@ class BatchGenerator:
 df_batcher = BatchGenerator(200)
 
 
-# Check whether the index with the same name already exists - if so, delete it
-if index_name in pinecone.list_indexes():
-    pinecone.delete_index(index_name)
-    
-# Creates new index
-spec = ServerlessSpec(
-    cloud="aws",
-    region="us-east-1"
-)
+def compile_wiki_strings():
+    pages = site.allpages()
+    titles, urls = list_of_titles(pages, limit=allpages_limit)
+    # split pages into sections
+    # may take ~1 minute per 100 articles
+    wikipedia_sections = []
+    for title in titles:
+        wikipedia_sections.extend(all_subsections_from_title(title))
+    print(f"Found {len(wikipedia_sections)} sections in {len(titles)} pages.")
+    wikipedia_sections = [clean_section(ws) for ws in wikipedia_sections]
+    original_num_sections = len(wikipedia_sections)
+    wikipedia_sections = [ws for ws in wikipedia_sections if keep_section(ws)]
+    print(f"Filtered out {original_num_sections-len(wikipedia_sections)} sections, leaving {len(wikipedia_sections)} sections.")
+    # print example data
+    for ws in wikipedia_sections[:5]:
+        print(ws[0])
+        print(ws[1][:77] + "...")
+        print()
+    # split sections into chunks
+    MAX_TOKENS = 1600
+    wikipedia_strings = []
+    for section in wikipedia_sections:
+        wikipedia_strings.extend(split_strings_from_subsection(section, max_tokens=MAX_TOKENS))
 
-# check if index already exists (it shouldn't if this is your first run)
-if index_name not in pinecone.list_indexes().names():
-    # if does not exist, create index
-    pinecone.create_index(
-        index_name,
-        dimension=len(df['embedding'][0]),
-        metric='cosine',
-        spec=spec
+    print(f"{len(wikipedia_sections)} Wikipedia sections split into {len(wikipedia_strings)} strings.")
+    # print example data
+    print(wikipedia_strings[1])
+    return wikipedia_strings, urls
+
+
+def compile_embeddings(wikipedia_strings, urls):
+    BATCH_SIZE = 1000  # you can submit up to 2048 embedding inputs per request
+
+    embeddings = []
+    for batch_start in range(0, len(wikipedia_strings), BATCH_SIZE):
+        batch_end = batch_start + BATCH_SIZE
+        batch = wikipedia_strings[batch_start:batch_end]
+        print(f"Batch {batch_start} to {batch_end-1}")
+        response = client.embeddings.create(model=EMBEDDING_MODEL, input=batch)
+        for i, be in enumerate(response.data):
+            assert i == be.index  # double check embeddings are in same order as input
+        batch_embeddings = [e.embedding for e in response.data]
+        embeddings.extend(batch_embeddings)
+
+    df = pd.DataFrame({"text": wikipedia_strings, "embedding": embeddings})
+    df["title"] = df['text'].apply(get_first_line)
+    df["url"] = df['title'].apply(get_url)
+    df["vector_id"] = df['text'].apply(generate_vector_id)
+
+    for value in df['title']:
+        print(value)
+    for value in df['url']:
+        print(value)
+    for value in df['vector_id']:
+        print(value)
+
+    return df
+
+
+def upsert_data(df):
+    conn = sqlite3.connect(SQLITE_DB)
+    c = conn.cursor()
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS ArticleChunks (
+        unique_id TEXT PRIMARY KEY,
+        title TEXT,
+        content TEXT,
+        url TEXT
     )
-    # wait for index to be initialized
-    while not pinecone.describe_index(index_name).status['ready']:
-        time.sleep(1)
-
-# connect to index
-index = pinecone.Index(index_name)
-time.sleep(1)
-# view index stats
-print(index.describe_index_stats())
-# Confirm our index was created
-print(pinecone.list_indexes())
-
-# Upsert content vectors in content namespace - this can take a few minutes
-print("Uploading vectors to content namespace..")
-conn = sqlite3.connect(SQLITE_DB)
-c = conn.cursor()
-for batch_df in df_batcher(df):
-    index.upsert(vectors=zip(
-        batch_df.vector_id, batch_df.embedding,
-        [{**a, **b} for a, b in zip(
-            [{ "title": t } for t in batch_df.title ],
-            [{ "url": u } for u in batch_df.url ])
-        ]
-    ), namespace='content')
-    for rownum, row in batch_df.iterrows():
-        c.execute('''
-        INSERT INTO ArticleChunks (unique_id, title, content, url)
-        VALUES (?, ?, ?, ?)
-        ''', (row['vector_id'], row['title'], row['text'], row['url']))
-        print("Inserted row ", rownum, row['title'])
-conn.commit()
-conn.close()
-print("Records inserted successfully.")
+    ''')
+    conn.commit()
+    # conn.close()
 
 
-# Check index size for each namespace to confirm all of our docs have loaded
-print(index.describe_index_stats())
+    # Check whether the index with the same name already exists - if so, delete it
+    if index_name in pinecone.list_indexes():
+        pinecone.delete_index(index_name)
+        
+    # Creates new index
+    spec = ServerlessSpec(
+        cloud="aws",
+        region="us-east-1"
+    )
+    # check if index already exists (it shouldn't if this is your first run)
+    if index_name not in pinecone.list_indexes().names():
+        # if does not exist, create index
+        pinecone.create_index(
+            index_name,
+            dimension=len(df['embedding'][0]),
+            metric='cosine',
+            spec=spec
+        )
+        # wait for index to be initialized
+        while not pinecone.describe_index(index_name).status['ready']:
+            time.sleep(1)
+
+    # connect to index
+    index = pinecone.Index(index_name)
+    time.sleep(1)
+    # view index stats
+    print(index.describe_index_stats())
+    # Confirm our index was created
+    print(pinecone.list_indexes())
+
+    # Upsert content vectors in content namespace - this can take a few minutes
+    print("Uploading vectors to content namespace..")
+    # conn = sqlite3.connect(SQLITE_DB)
+    # c = conn.cursor()
+    for batch_df in df_batcher(df):
+        index.upsert(vectors=zip(
+            batch_df.vector_id, batch_df.embedding,
+            [{**a, **b} for a, b in zip(
+                [{ "title": t } for t in batch_df.title ],
+                [{ "url": u } for u in batch_df.url ])
+            ]
+        ), namespace='content')
+        for rownum, row in batch_df.iterrows():
+            c.execute('''
+            INSERT INTO ArticleChunks (unique_id, title, content, url)
+            VALUES (?, ?, ?, ?)
+            ''', (row['vector_id'], row['title'], row['text'], row['url']))
+            print("Inserted row ", rownum, row['title'])
+    conn.commit()
+    conn.close()
+    print("Records inserted successfully.")
+
+    # Check index size for each namespace to confirm all of our docs have loaded
+    print(index.describe_index_stats())
+
+
+wiki_strings, urls = compile_wiki_strings()
+df = compile_embeddings(wiki_strings, urls)
+upsert_data(df)
 
 index = pinecone.Index(index_name)
 

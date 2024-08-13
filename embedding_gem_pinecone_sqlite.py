@@ -1,7 +1,7 @@
 """
-embedding_gem_wisconsin_sqlite.py:
-Generates embeddings from the GEM wiki for the category "Wisconsin,"
-saves the embeddings in Pinecone, and saves the article segments in sqlite.
+embedding_gem_pinecone_sqlite.py:
+Generates embeddings from the GEM wiki, saves the embeddings in Pinecone,
+and saves the article segments in sqlite.
 
 For more information see:
 https://cookbook.openai.com/examples/embedding_wikipedia_articles_for_search
