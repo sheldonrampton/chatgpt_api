@@ -9,7 +9,6 @@ https://cookbook.openai.com/examples/embedding_wikipedia_articles_for_search
 
 # imports
 from openai import OpenAI # for calling the OpenAI API
-
 import mwclient  # for downloading example Wikipedia articles
 from typing import List, Iterator
 from mediawiki import MediaWiki
@@ -26,346 +25,316 @@ import sqlite3
 import itertools
 
 
-def unwanted_sections():
-    return [
-        "See also",
-        "References",
-        "External links",
-        "Further reading",
-        "Footnotes",
-        "Bibliography",
-        "Sources",
-        "Citations",
-        "Literature",
-        "Footnotes",
-        "Notes and references",
-        "Photo gallery",
-        "Works cited",
-        "Photos",
-        "Gallery",
-        "Notes",
-        "References and sources",
-        "References and notes",
-    ]
+# Models a simple batch generator that make chunks out of an input DataFrame
+class WikiExtractor:
+
+    def __init__(self,
+        site_name: str = "www.gem.wiki",
+        url: str = 'https://www.gem.wiki/w/api.php',
+        user_agent: str = 'sheldon-ramptons-agent',
+        gpt_model: str = "gpt-3.5-turbo",  # selects which tokenizer to use
+        limit: int = 50,
+        debug = False
+    ) -> None:
+        self.site_name = site_name
+        self.site = mwclient.Site(site_name)
+        self.gw = MediaWiki(url=url, user_agent=user_agent)
+        self.url = url
+        self.user_agent = user_agent
+        self.gpt_model = gpt_model
+        self.limit = limit
+        self.sections_to_ignore = [
+            "See also",
+            "References",
+            "External links",
+            "Further reading",
+            "Footnotes",
+            "Bibliography",
+            "Sources",
+            "Citations",
+            "Literature",
+            "Footnotes",
+            "Notes and references",
+            "Photo gallery",
+            "Works cited",
+            "Photos",
+            "Gallery",
+            "Notes",
+            "References and sources",
+            "References and notes",
+        ]
+        self.debug = debug
+    
+    # Makes chunks out of an input DataFrame
+    def list_of_titles(
+        self: int
+    ) -> set[str]:
+        """Return a set of page titles in a given Wiki category and its subcategories."""
+        pages = self.site.allpages()
+        titles = set()
+        urls = {}
+        for page in itertools.islice(pages, self.limit):
+            title = page.name
+            titles.add(title)
+            urls[title] = self.gw.opensearch(title, results=1)[0][2]
+        return titles, urls
 
 
-# OpenAI configuration
-organization='org-M7JuSsksoyQIdQOGaTgA2wkk'
-project='proj_E0H6uUDUEkSZfn0jdmqy206G'
-GPT_MODEL = "gpt-3.5-turbo"  # selects which tokenizer to use
-EMBEDDING_MODEL = "text-embedding-3-small"
-
-# mwclient configuration
-CATEGORY_TITLE = "Category:Wisconsin"
-WIKI_SITE = "www.gem.wiki"
-allpages_limit=50
-SECTIONS_TO_IGNORE = unwanted_sections()
-
-# mw_for_titles configuration
-url='https://www.gem.wiki/w/api.php'
-user_agent='sheldon-ramptons-agent'
-
-# sqlite configuration
-SQLITE_DB = 'gem_wiki_50.db'
-
-# Pinecone configuration
-pinecone_api_key = os.environ.get('PINECONE_API_KEY')
-index_name = 'gem-wiki-50'
-
-
-client = OpenAI(organization=organization, project=project)
-site = mwclient.Site(WIKI_SITE)
-gw = MediaWiki(url=url, user_agent=user_agent)
-pinecone = Pinecone(api_key=pinecone_api_key)
-
-
-def list_of_titles(
-    pages: mwclient.listing, limit: int
-) -> set[str]:
-    """Return a set of page titles in a given Wiki category and its subcategories."""
-    titles = set()
-    urls = {}
-    for page in itertools.islice(pages, limit):
-        title = page.name
-        titles.add(title)
-        urls[title] = gw.opensearch(title, results=1)[0][2]
-    return titles, urls
+    def all_subsections_from_section(
+        self, section: mwparserfromhell.wikicode.Wikicode,
+        parent_titles: list[str],
+    ) -> list[tuple[list[str], str]]:
+        """
+        From a Wikipedia section, return a flattened list of all nested subsections.
+        Each subsection is a tuple, where:
+            - the first element is a list of parent subtitles, starting with the page title
+            - the second element is the text of the subsection (but not any children)
+        """
+        headings = [str(h) for h in section.filter_headings()]
+        title = headings[0]
+        if title.strip("=" + " ") in self.sections_to_ignore:
+            # ^wiki headings are wrapped like "== Heading =="
+            return []
+        titles = parent_titles + [title]
+        full_text = str(section)
+        section_text = full_text.split(title)[1]
+        if len(headings) == 1:
+            return [(titles, section_text)]
+        else:
+            first_subtitle = headings[1]
+            section_text = section_text.split(first_subtitle)[0]
+            results = [(titles, section_text)]
+            for subsection in section.get_sections(levels=[len(titles) + 1]):
+                results.extend(self.all_subsections_from_section(subsection, titles))
+            return results
 
 
-def all_subsections_from_section(
-    section: mwparserfromhell.wikicode.Wikicode,
-    parent_titles: list[str],
-    sections_to_ignore: set[str],
-) -> list[tuple[list[str], str]]:
-    """
-    From a Wikipedia section, return a flattened list of all nested subsections.
-    Each subsection is a tuple, where:
-        - the first element is a list of parent subtitles, starting with the page title
-        - the second element is the text of the subsection (but not any children)
-    """
-    headings = [str(h) for h in section.filter_headings()]
-    title = headings[0]
-    if title.strip("=" + " ") in sections_to_ignore:
-        # ^wiki headings are wrapped like "== Heading =="
-        return []
-    titles = parent_titles + [title]
-    full_text = str(section)
-    section_text = full_text.split(title)[1]
-    if len(headings) == 1:
-        return [(titles, section_text)]
-    else:
-        first_subtitle = headings[1]
-        section_text = section_text.split(first_subtitle)[0]
-        results = [(titles, section_text)]
-        for subsection in section.get_sections(levels=[len(titles) + 1]):
-            results.extend(all_subsections_from_section(subsection, titles, sections_to_ignore))
+    def all_subsections_from_title(
+        self,
+        title: str,
+    ) -> list[tuple[list[str], str]]:
+        """From a Wikipedia page title, return a flattened list of all nested subsections.
+        Each subsection is a tuple, where:
+            - the first element is a list of parent subtitles, starting with the page title
+            - the second element is the text of the subsection (but not any children)
+        """
+        page = self.site.pages[title]
+        text = page.text()
+        parsed_text = mwparserfromhell.parse(text)
+        headings = [str(h) for h in parsed_text.filter_headings()]
+        if headings:
+            summary_text = str(parsed_text).split(headings[0])[0]
+        else:
+            summary_text = str(parsed_text)
+        results = [([title], summary_text)]
+        for subsection in parsed_text.get_sections(levels=[2]):
+            results.extend(self.all_subsections_from_section(subsection, [title]))
         return results
 
 
-def all_subsections_from_title(
-    title: str,
-    sections_to_ignore: set[str] = SECTIONS_TO_IGNORE,
-    site_name: str = WIKI_SITE,
-) -> list[tuple[list[str], str]]:
-    """From a Wikipedia page title, return a flattened list of all nested subsections.
-    Each subsection is a tuple, where:
-        - the first element is a list of parent subtitles, starting with the page title
-        - the second element is the text of the subsection (but not any children)
-    """
-    site = mwclient.Site(site_name)
-    page = site.pages[title]
-    text = page.text()
-    parsed_text = mwparserfromhell.parse(text)
-    headings = [str(h) for h in parsed_text.filter_headings()]
-    if headings:
-        summary_text = str(parsed_text).split(headings[0])[0]
-    else:
-        summary_text = str(parsed_text)
-    results = [([title], summary_text)]
-    for subsection in parsed_text.get_sections(levels=[2]):
-        results.extend(all_subsections_from_section(subsection, [title], sections_to_ignore))
-    return results
-
-
-# clean text
-def clean_section(section: tuple[list[str], str]) -> tuple[list[str], str]:
-    """
-    Return a cleaned up section with:
-        - <ref>xyz</ref> patterns removed
-        - leading/trailing whitespace removed
-    """
-    titles, text = section
-    text = re.sub(r"<ref.*?</ref>", "", text)
-    text = text.strip()
-    return (titles, text)
+    # clean text
+    def clean_section(self, section: tuple[list[str], str]) -> tuple[list[str], str]:
+        """
+        Return a cleaned up section with:
+            - <ref>xyz</ref> patterns removed
+            - leading/trailing whitespace removed
+        """
+        titles, text = section
+        text = re.sub(r"<ref.*?</ref>", "", text)
+        text = text.strip()
+        return (titles, text)
 
 
 
-# filter out short/blank sections
-def keep_section(section: tuple[list[str], str]) -> bool:
-    """Return True if the section should be kept, False otherwise."""
-    titles, text = section
-    if len(text) < 16:
-        return False
-    else:
-        return True
+    # filter out short/blank sections
+    def keep_section(self, section: tuple[list[str], str]) -> bool:
+        """Return True if the section should be kept, False otherwise."""
+        titles, text = section
+        if len(text) < 16:
+            return False
+        else:
+            return True
 
 
-def num_tokens(text: str, model: str = GPT_MODEL) -> int:
-    """Return the number of tokens in a string."""
-    encoding = tiktoken.encoding_for_model(model)
-    return len(encoding.encode(text))
+    def num_tokens(self, text: str) -> int:
+        """Return the number of tokens in a string."""
+        encoding = tiktoken.encoding_for_model(self.gpt_model)
+        return len(encoding.encode(text))
 
 
-def halved_by_delimiter(string: str, delimiter: str = "\n") -> list[str, str]:
-    """Split a string in two, on a delimiter, trying to balance tokens on each side."""
-    chunks = string.split(delimiter)
-    if len(chunks) == 1:
-        return [string, ""]  # no delimiter found
-    elif len(chunks) == 2:
-        return chunks  # no need to search for halfway point
-    else:
-        total_tokens = num_tokens(string)
-        halfway = total_tokens // 2
-        best_diff = halfway
-        for i, chunk in enumerate(chunks):
-            left = delimiter.join(chunks[: i + 1])
-            left_tokens = num_tokens(left)
-            diff = abs(halfway - left_tokens)
-            if diff >= best_diff:
-                break
-            else:
-                best_diff = diff
-        left = delimiter.join(chunks[:i])
-        right = delimiter.join(chunks[i:])
-        return [left, right]
+    def halved_by_delimiter(self, string: str, delimiter: str = "\n") -> list[str, str]:
+        """Split a string in two, on a delimiter, trying to balance tokens on each side."""
+        chunks = string.split(delimiter)
+        if len(chunks) == 1:
+            return [string, ""]  # no delimiter found
+        elif len(chunks) == 2:
+            return chunks  # no need to search for halfway point
+        else:
+            total_tokens = self.num_tokens(string)
+            halfway = total_tokens // 2
+            best_diff = halfway
+            for i, chunk in enumerate(chunks):
+                left = delimiter.join(chunks[: i + 1])
+                left_tokens = self.num_tokens(left)
+                diff = abs(halfway - left_tokens)
+                if diff >= best_diff:
+                    break
+                else:
+                    best_diff = diff
+            left = delimiter.join(chunks[:i])
+            right = delimiter.join(chunks[i:])
+            return [left, right]
 
 
-def truncated_string(
-    string: str,
-    model: str,
-    max_tokens: int,
-    print_warning: bool = True,
-) -> str:
-    """Truncate a string to a maximum number of tokens."""
-    encoding = tiktoken.encoding_for_model(model)
-    encoded_string = encoding.encode(string)
-    truncated_string = encoding.decode(encoded_string[:max_tokens])
-    if print_warning and len(encoded_string) > max_tokens:
-        print(f"Warning: Truncated string from {len(encoded_string)} tokens to {max_tokens} tokens.")
-    return truncated_string
+    def truncated_string(
+        self,
+        string: str,
+        max_tokens: int,
+        print_warning: bool = True,
+    ) -> str:
+        """Truncate a string to a maximum number of tokens."""
+        encoding = tiktoken.encoding_for_model(self.gpt_model)
+        encoded_string = encoding.encode(string)
+        truncated_string = encoding.decode(encoded_string[:max_tokens])
+        if print_warning and len(encoded_string) > max_tokens:
+            print(f"Warning: Truncated string from {len(encoded_string)} tokens to {max_tokens} tokens.")
+        return truncated_string
 
 
-def split_strings_from_subsection(
-    subsection: tuple[list[str], str],
-    max_tokens: int = 10000,
-    model: str = GPT_MODEL,
-    max_recursion: int = 5,
-) -> list[str]:
-    """
-    Split a subsection into a list of subsections, each with no more than max_tokens.
-    Each subsection is a tuple of parent titles [H1, H2, ...] and text (str).
-    """
-    titles, text = subsection
-    string = "\n\n".join(titles + [text])
-    num_tokens_in_string = num_tokens(string)
-    # if length is fine, return string
-    if num_tokens_in_string <= max_tokens:
-        return [string]
-    # if recursion hasn't found a split after X iterations, just truncate
-    elif max_recursion == 0:
-        return [truncated_string(string, model=model, max_tokens=max_tokens)]
-    # otherwise, split in half and recurse
-    else:
+    def split_strings_from_subsection(
+        self,
+        subsection: tuple[list[str], str],
+        max_tokens: int = 10000,
+        max_recursion: int = 5,
+    ) -> list[str]:
+        """
+        Split a subsection into a list of subsections, each with no more than max_tokens.
+        Each subsection is a tuple of parent titles [H1, H2, ...] and text (str).
+        """
         titles, text = subsection
-        for delimiter in ["\n\n", "\n", ". "]:
-            left, right = halved_by_delimiter(text, delimiter=delimiter)
-            if left == "" or right == "":
-                # if either half is empty, retry with a more fine-grained delimiter
-                continue
-            else:
-                # recurse on each half
-                results = []
-                for half in [left, right]:
-                    half_subsection = (titles, half)
-                    half_strings = split_strings_from_subsection(
-                        half_subsection,
-                        max_tokens=max_tokens,
-                        model=model,
-                        max_recursion=max_recursion - 1,
-                    )
-                    results.extend(half_strings)
-                return results
-    # otherwise no split was found, so just truncate (should be very rare)
-    return [truncated_string(string, model=model, max_tokens=max_tokens)]
+        string = "\n\n".join(titles + [text])
+        num_tokens_in_string = self.num_tokens(string)
+        # if length is fine, return string
+        if num_tokens_in_string <= max_tokens:
+            return [string]
+        # if recursion hasn't found a split after X iterations, just truncate
+        elif max_recursion == 0:
+            return [truncated_string(string, max_tokens=max_tokens)]
+        # otherwise, split in half and recurse
+        else:
+            titles, text = subsection
+            for delimiter in ["\n\n", "\n", ". "]:
+                left, right = halved_by_delimiter(text, delimiter=delimiter)
+                if left == "" or right == "":
+                    # if either half is empty, retry with a more fine-grained delimiter
+                    continue
+                else:
+                    # recurse on each half
+                    results = []
+                    for half in [left, right]:
+                        half_subsection = (titles, half)
+                        half_strings = split_strings_from_subsection(
+                            half_subsection,
+                            max_tokens=max_tokens,
+                            max_recursion=max_recursion - 1,
+                        )
+                        results.extend(half_strings)
+                    return results
+        # otherwise no split was found, so just truncate (should be very rare)
+        return [truncated_string(string, max_tokens=max_tokens)]
+
+    def compile_wiki_strings(self):
+        titles, urls = self.list_of_titles()
+        # split pages into sections
+        # may take ~1 minute per 100 articles
+        wikipedia_sections = []
+        for title in titles:
+            wikipedia_sections.extend(self.all_subsections_from_title(title))
+        if self.debug:
+            print(f"Found {len(wikipedia_sections)} sections in {len(titles)} pages.")
+        wikipedia_sections = [self.clean_section(ws) for ws in wikipedia_sections]
+        original_num_sections = len(wikipedia_sections)
+        wikipedia_sections = [ws for ws in wikipedia_sections if self.keep_section(ws)]
+        if self.debug:
+            print(f"Filtered out {original_num_sections-len(wikipedia_sections)} sections, leaving {len(wikipedia_sections)} sections.")
+            # print example data
+            for ws in wikipedia_sections[:5]:
+                print(ws[0])
+                print(ws[1][:77] + "...")
+                print()
+        # split sections into chunks
+        MAX_TOKENS = 1600
+        wikipedia_strings = []
+        for section in wikipedia_sections:
+            wikipedia_strings.extend(self.split_strings_from_subsection(section, max_tokens=MAX_TOKENS))
+
+        if self.debug:
+            print(f"{len(wikipedia_sections)} Wikipedia sections split into {len(wikipedia_strings)} strings.")
+            # print example data
+            print(wikipedia_strings[1])
+        return wikipedia_strings, urls
 
 
-def num_tokens(text: str, model: str = GPT_MODEL) -> int:
-    """Return the number of tokens in a string."""
-    encoding = tiktoken.encoding_for_model(model)
-    return len(encoding.encode(text))
+class Embedder:
+    def __init__(
+        self,
+        openai_client,
+        batch_size = 1000,
+        embedding_model = "text-embedding-3-small",
+        debug = False
+    ) -> None:
+        self.openai_client = openai_client
+        self.batch_size = batch_size
+        self.embedding_model = embedding_model
+        self.debug = debug
 
+    def get_first_line(self, text):
+        return text.split('\n')[0]
 
-def halved_by_delimiter(string: str, delimiter: str = "\n") -> list[str, str]:
-    """Split a string in two, on a delimiter, trying to balance tokens on each side."""
-    chunks = string.split(delimiter)
-    if len(chunks) == 1:
-        return [string, ""]  # no delimiter found
-    elif len(chunks) == 2:
-        return chunks  # no need to search for halfway point
-    else:
-        total_tokens = num_tokens(string)
-        halfway = total_tokens // 2
-        best_diff = halfway
-        for i, chunk in enumerate(chunks):
-            left = delimiter.join(chunks[: i + 1])
-            left_tokens = num_tokens(left)
-            diff = abs(halfway - left_tokens)
-            if diff >= best_diff:
-                break
-            else:
-                best_diff = diff
-        left = delimiter.join(chunks[:i])
-        right = delimiter.join(chunks[i:])
-        return [left, right]
+    def get_url(self, title):
+        if title in urls.keys():
+            return urls[title]
+        else:
+            return ''
 
+    def generate_vector_id(self, text: str) -> str:
+        # Create a SHA256 hash object
+        hash_object = hashlib.sha256()
+        
+        # Update the hash object with the text encoded in UTF-8
+        hash_object.update(text.encode('utf-8'))
+        
+        # Return the hexadecimal digest of the hash, which is a string representation of the hash
+        return hash_object.hexdigest()
 
-def truncated_string(
-    string: str,
-    model: str,
-    max_tokens: int,
-    print_warning: bool = True,
-) -> str:
-    """Truncate a string to a maximum number of tokens."""
-    encoding = tiktoken.encoding_for_model(model)
-    encoded_string = encoding.encode(string)
-    truncated_string = encoding.decode(encoded_string[:max_tokens])
-    if print_warning and len(encoded_string) > max_tokens:
-        print(f"Warning: Truncated string from {len(encoded_string)} tokens to {max_tokens} tokens.")
-    return truncated_string
+    def compile_embeddings(self, wikipedia_strings, urls):
+        embeddings = []
+        for batch_start in range(0, len(wikipedia_strings), self.batch_size):
+            batch_end = batch_start + self.batch_size
+            batch = wikipedia_strings[batch_start:batch_end]
+            if self.debug:
+                print(f"Batch {batch_start} to {batch_end-1}")
+            response = self.openai_client.embeddings.create(model=self.embedding_model, input=batch)
+            for i, be in enumerate(response.data):
+                assert i == be.index  # double check embeddings are in same order as input
+            batch_embeddings = [e.embedding for e in response.data]
+            embeddings.extend(batch_embeddings)
 
+        df = pd.DataFrame({"text": wikipedia_strings, "embedding": embeddings})
+        df["title"] = df['text'].apply(self.get_first_line)
+        df["url"] = df['title'].apply(self.get_url)
+        df["vector_id"] = df['text'].apply(self.generate_vector_id)
+        df["vector_id"] = df.apply(lambda row: self.generate_vector_id(row['url'] + row['text']), axis=1)
 
-def split_strings_from_subsection(
-    subsection: tuple[list[str], str],
-    max_tokens: int = 1000,
-    model: str = GPT_MODEL,
-    max_recursion: int = 5,
-) -> list[str]:
-    """
-    Split a subsection into a list of subsections, each with no more than max_tokens.
-    Each subsection is a tuple of parent titles [H1, H2, ...] and text (str).
-    """
-    titles, text = subsection
-    string = "\n\n".join(titles + [text])
-    num_tokens_in_string = num_tokens(string)
-    # if length is fine, return string
-    if num_tokens_in_string <= max_tokens:
-        return [string]
-    # if recursion hasn't found a split after X iterations, just truncate
-    elif max_recursion == 0:
-        return [truncated_string(string, model=model, max_tokens=max_tokens)]
-    # otherwise, split in half and recurse
-    else:
-        titles, text = subsection
-        for delimiter in ["\n\n", "\n", ". "]:
-            left, right = halved_by_delimiter(text, delimiter=delimiter)
-            if left == "" or right == "":
-                # if either half is empty, retry with a more fine-grained delimiter
-                continue
-            else:
-                # recurse on each half
-                results = []
-                for half in [left, right]:
-                    half_subsection = (titles, half)
-                    half_strings = split_strings_from_subsection(
-                        half_subsection,
-                        max_tokens=max_tokens,
-                        model=model,
-                        max_recursion=max_recursion - 1,
-                    )
-                    results.extend(half_strings)
-                return results
-    # otherwise no split was found, so just truncate (should be very rare)
-    return [truncated_string(string, model=model, max_tokens=max_tokens)]
+        if self.debug:
+            for value in df['title']:
+                print(value)
+            for value in df['url']:
+                print(value)
+            for value in df['vector_id']:
+                print(value)
 
-
-# Define a function to extract the first line
-def get_first_line(text):
-    return text.split('\n')[0]
-
-
-def get_url(title):
-    return urls[title]
-
-def generate_vector_id(text: str) -> str:
-    # Create a SHA256 hash object
-    hash_object = hashlib.sha256()
-    
-    # Update the hash object with the text encoded in UTF-8
-    hash_object.update(text.encode('utf-8'))
-    
-    # Return the hexadecimal digest of the hash, which is a string representation of the hash
-    return hash_object.hexdigest()
+        return df
 
 
 # Models a simple batch generator that make chunks out of an input DataFrame
@@ -389,205 +358,200 @@ class BatchGenerator:
     
     __call__ = to_batches
 
-df_batcher = BatchGenerator(200)
 
+class Storer:
 
-def compile_wiki_strings():
-    pages = site.allpages()
-    titles, urls = list_of_titles(pages, limit=allpages_limit)
-    # split pages into sections
-    # may take ~1 minute per 100 articles
-    wikipedia_sections = []
-    for title in titles:
-        wikipedia_sections.extend(all_subsections_from_title(title))
-    print(f"Found {len(wikipedia_sections)} sections in {len(titles)} pages.")
-    wikipedia_sections = [clean_section(ws) for ws in wikipedia_sections]
-    original_num_sections = len(wikipedia_sections)
-    wikipedia_sections = [ws for ws in wikipedia_sections if keep_section(ws)]
-    print(f"Filtered out {original_num_sections-len(wikipedia_sections)} sections, leaving {len(wikipedia_sections)} sections.")
-    # print example data
-    for ws in wikipedia_sections[:5]:
-        print(ws[0])
-        print(ws[1][:77] + "...")
-        print()
-    # split sections into chunks
-    MAX_TOKENS = 1600
-    wikipedia_strings = []
-    for section in wikipedia_sections:
-        wikipedia_strings.extend(split_strings_from_subsection(section, max_tokens=MAX_TOKENS))
+    def __init__(
+        self,
+        openai_client,
+        df,
+        db_path = 'gem_wiki_50.db',
+        pinecone_index_name = 'gem-wiki-50',
+        embedding_model = "text-embedding-3-small",
+        overwrite_db = False,
+        overwrite_pinecone = False,
+        debug = False
+    ) -> None:
+        self.openai_client = openai_client
+        self.df = df
+        self.db_path = db_path
+        self.pinecone_index_name = pinecone_index_name
+        self.embedding_model = embedding_model
+        self.overwrite_db = overwrite_db
+        self.overwrite_pinecone = overwrite_pinecone
+        self.debug = debug
+        self.setup_database()
+        self.setup_pinecone()
+        self.upsert_data()
 
-    print(f"{len(wikipedia_sections)} Wikipedia sections split into {len(wikipedia_strings)} strings.")
-    # print example data
-    print(wikipedia_strings[1])
-    return wikipedia_strings, urls
-
-
-def compile_embeddings(wikipedia_strings, urls):
-    BATCH_SIZE = 1000  # you can submit up to 2048 embedding inputs per request
-
-    embeddings = []
-    for batch_start in range(0, len(wikipedia_strings), BATCH_SIZE):
-        batch_end = batch_start + BATCH_SIZE
-        batch = wikipedia_strings[batch_start:batch_end]
-        print(f"Batch {batch_start} to {batch_end-1}")
-        response = client.embeddings.create(model=EMBEDDING_MODEL, input=batch)
-        for i, be in enumerate(response.data):
-            assert i == be.index  # double check embeddings are in same order as input
-        batch_embeddings = [e.embedding for e in response.data]
-        embeddings.extend(batch_embeddings)
-
-    df = pd.DataFrame({"text": wikipedia_strings, "embedding": embeddings})
-    df["title"] = df['text'].apply(get_first_line)
-    df["url"] = df['title'].apply(get_url)
-    df["vector_id"] = df['text'].apply(generate_vector_id)
-
-    for value in df['title']:
-        print(value)
-    for value in df['url']:
-        print(value)
-    for value in df['vector_id']:
-        print(value)
-
-    return df
-
-
-def upsert_data(df):
-    conn = sqlite3.connect(SQLITE_DB)
-    c = conn.cursor()
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS ArticleChunks (
-        unique_id TEXT PRIMARY KEY,
-        title TEXT,
-        content TEXT,
-        url TEXT
-    )
-    ''')
-    conn.commit()
-    # conn.close()
-
-    # Check whether the index with the same name already exists - if so, delete it
-    if index_name in pinecone.list_indexes():
-        pinecone.delete_index(index_name)
-        
-    # Creates new index
-    spec = ServerlessSpec(
-        cloud="aws",
-        region="us-east-1"
-    )
-    # check if index already exists (it shouldn't if this is your first run)
-    if index_name not in pinecone.list_indexes().names():
-        # if does not exist, create index
-        pinecone.create_index(
-            index_name,
-            dimension=len(df['embedding'][0]),
-            metric='cosine',
-            spec=spec
-        )
-        # wait for index to be initialized
-        while not pinecone.describe_index(index_name).status['ready']:
-            time.sleep(1)
-
-    # connect to index
-    index = pinecone.Index(index_name)
-    time.sleep(1)
-    # view index stats
-    print(index.describe_index_stats())
-    # Confirm our index was created
-    print(pinecone.list_indexes())
-
-    # Upsert content vectors in content namespace - this can take a few minutes
-    print("Uploading vectors to content namespace..")
-    # conn = sqlite3.connect(SQLITE_DB)
-    # c = conn.cursor()
-    for batch_df in df_batcher(df):
-        index.upsert(vectors=zip(
-            batch_df.vector_id, batch_df.embedding,
-            [{**a, **b} for a, b in zip(
-                [{ "title": t } for t in batch_df.title ],
-                [{ "url": u } for u in batch_df.url ])
-            ]
-        ), namespace='content')
-        for rownum, row in batch_df.iterrows():
+    def setup_database(self):
+        if os.path.exists(self.db_path) and self.overwrite_db:
+            os.remove(self.db_path)
+        if not os.path.exists(self.db_path):
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
             c.execute('''
-            INSERT INTO ArticleChunks (unique_id, title, content, url)
-            VALUES (?, ?, ?, ?)
-            ''', (row['vector_id'], row['title'], row['text'], row['url']))
-            print("Inserted row ", rownum, row['title'])
-    conn.commit()
-    conn.close()
-    print("Records inserted successfully.")
+            CREATE TABLE IF NOT EXISTS ArticleChunks (
+                unique_id TEXT PRIMARY KEY,
+                title TEXT,
+                content TEXT,
+                url TEXT
+            )
+            ''')
+            conn.commit()
+            conn.close()
 
-    # Check index size for each namespace to confirm all of our docs have loaded
-    print(index.describe_index_stats())
+    def setup_pinecone(self):
+        # Check whether the index with the same name already exists - if so, delete it
+        pinecone_api_key = os.environ.get('PINECONE_API_KEY')
+        pinecone = Pinecone(api_key=pinecone_api_key)
+        if self.pinecone_index_name in pinecone.list_indexes() and self.overwrite_pinecone:
+            pinecone.delete_index(self.pinecone_index_name)
 
+        # Creates index if it doesn't already exist.
+        if self.pinecone_index_name not in pinecone.list_indexes().names():
+            # if does not exist, create index
+            spec = ServerlessSpec(
+                cloud="aws",
+                region="us-east-1"
+            )
+            pinecone.create_index(
+                self.pinecone_index_name,
+                dimension=len(self.df['embedding'][0]),
+                metric='cosine',
+                spec=spec
+            )
+            # wait for index to be initialized
+            while not pinecone.describe_index(self.pinecone_index_name).status['ready']:
+                time.sleep(1)
 
-def get_article_chunk(unique_id):
-    conn = sqlite3.connect(SQLITE_DB)
-    cursor = conn.cursor()
-    # SQL query to retrieve the row with the specified unique_id
-    query = "SELECT title, url, content FROM ArticleChunks WHERE unique_id = ?"
-    try:
-        # Execute the query and fetch the row
-        cursor.execute(query, (unique_id, ))
-        row = cursor.fetchone()
+        # connect to index
+        self.pinecone_index = pinecone.Index(self.pinecone_index_name)
+        time.sleep(1)
+        if self.debug:
+            # view index stats
+            print(self.pinecone_index.describe_index_stats())
+            # Confirm our index was created
+            print(pinecone.list_indexes())
+
+    def upsert_data(self):
+        # Upsert content vectors in content namespace - this can take a few minutes
+        if self.debug:
+            print("Uploading vectors to content namespace..")
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        df_batcher = BatchGenerator(200)
+        for batch_df in df_batcher(self.df):
+            self.pinecone_index.upsert(vectors=zip(
+                batch_df.vector_id, batch_df.embedding,
+                [{**a, **b} for a, b in zip(
+                    [{ "title": t } for t in batch_df.title ],
+                    [{ "url": u } for u in batch_df.url ])
+                ]
+            ), namespace='content')
+            for rownum, row in batch_df.iterrows():
+                c.execute('''
+                INSERT INTO ArticleChunks (unique_id, title, content, url)
+                VALUES (?, ?, ?, ?)
+                ''', (row['vector_id'], row['title'], row['text'], row['url']))
+                if self.debug:
+                    print("Inserted row ", rownum, row['vector_id'], row['title'])
+        conn.commit()
         conn.close()
+        if self.debug:
+            print("Records inserted successfully.")
 
-        # Check if a row was found
-        if row:
-            return row
-        else:
-            print(f"No row found with unique_id = {unique_id}")
+            # Check index size for each namespace to confirm all of our docs have loaded
+            print(self.pinecone_index.describe_index_stats())
+
+    def get_article_chunk(self, unique_id):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        # SQL query to retrieve the row with the specified unique_id
+        query = "SELECT title, url, content FROM ArticleChunks WHERE unique_id = ?"
+        try:
+            # Execute the query and fetch the row
+            cursor.execute(query, (unique_id, ))
+            row = cursor.fetchone()
+            conn.close()
+
+            # Check if a row was found
+            if row:
+                return row
+            else:
+                print(f"No row found with unique_id = {unique_id}")
+                return ['', '', '']
+        except sqlite3.Error as e:
+            print(f"An error occurred: {e}")
             return None
-    except sqlite3.Error as e:
-        print(f"An error occurred: {e}")
-        return None
+
+    def query_article(self, query, namespace, top_k=5):
+        '''Queries an article using its title in the specified
+         namespace and prints results.'''
+
+        # Use the OpenAI client to create vector embeddings based on the title column
+        res = self.openai_client.embeddings.create(input=[query], model=self.embedding_model)
+        embedded_query = res.data[0].embedding
+
+        # Query namespace passed as parameter using title vector
+        query_result = self.pinecone_index.query(
+            namespace=namespace,
+            vector=embedded_query,
+            top_k=top_k
+        )
+
+        # Print query results 
+        if self.debug:
+            print(f'\nMost similar results to {query} in "{namespace}" namespace:\n')
+            if not query_result.matches:
+                print('no query result')
+        
+        matches = query_result.matches
+        ids = [res.id for res in matches]
+        scores = [res.score for res in matches]
+        df = pd.DataFrame({'id':ids, 
+                           'score':scores
+                           })
+        df['title'], df['url'], df['content'] = zip(*df['id'].apply(lambda x: self.get_article_chunk(x)))
+        
+        if self.debug:
+            counter = 0
+            for k,v in df.iterrows():
+                counter += 1
+                print(f'{v.title} (score = {v.score})')
+            
+            print('\n')
+
+        return df
 
 
-def query_article(query, namespace, top_k=5):
-    '''Queries an article using its title in the specified
-     namespace and prints results.'''
-
-    index = pinecone.Index(index_name)
-    # Use the OpenAI client to create vector embeddings based on the title column
-    res = client.embeddings.create(input=[query], model=EMBEDDING_MODEL)
-    embedded_query = res.data[0].embedding
-
-    # Query namespace passed as parameter using title vector
-    query_result = index.query(
-        namespace=namespace,
-        vector=embedded_query,
-        top_k=top_k
-    )
-
-    # Print query results 
-    print(f'\nMost similar results to {query} in "{namespace}" namespace:\n')
-    if not query_result.matches:
-        print('no query result')
-    
-    matches = query_result.matches
-    ids = [res.id for res in matches]
-    scores = [res.score for res in matches]
-    df = pd.DataFrame({'id':ids, 
-                       'score':scores
-                       })
-    df['title'], df['url'], df['content'] = zip(*df['id'].apply(lambda x: get_article_chunk(x)))
-    
-    counter = 0
-    for k,v in df.iterrows():
-        counter += 1
-        print(f'{v.title} (score = {v.score})')
-    
-    print('\n')
-
-    return df
-
-
-wiki_strings, urls = compile_wiki_strings()
-df = compile_embeddings(wiki_strings, urls)
-upsert_data(df)
-
-query_output = query_article('Clean Coal','content')
+extractor = WikiExtractor(debug=True)
+wiki_strings, urls = extractor.compile_wiki_strings()
+openai_client = OpenAI(
+    organization='org-M7JuSsksoyQIdQOGaTgA2wkk',
+    project='proj_E0H6uUDUEkSZfn0jdmqy206G'
+)
+embedder = Embedder(openai_client, debug=True)
+df = embedder.compile_embeddings(wiki_strings, urls)
+storage = Storer(openai_client, df, overwrite_db = True, overwrite_pinecone = True, debug=True)
+query_output = storage.query_article('Clean Coal','content')
 print(query_output)
-
-content_query_output = query_article("Wipperdorf",'content')
+content_query_output = storage.query_article("Wipperdorf",'content')
 print(content_query_output)
+
+
+
+
+# client = OpenAI(organization=organization, project=project)
+# site = mwclient.Site(WIKI_SITE)
+# gw = MediaWiki(url=url, user_agent=user_agent)
+# pinecone = Pinecone(api_key=pinecone_api_key)
+# wiki_strings, urls = compile_wiki_strings()
+# df = compile_embeddings(wiki_strings, urls)
+# upsert_data(df)
+
+# query_output = query_article('Clean Coal','content')
+# print(query_output)
+
+# content_query_output = query_article("Wipperdorf",'content')
+# print(content_query_output)
