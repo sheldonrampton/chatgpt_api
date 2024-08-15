@@ -8,150 +8,36 @@ https://cookbook.openai.com/examples/question_answering_using_embeddings
 """
 
 # imports
-import ast  # for converting embeddings saved as strings back to arrays
+import chatbotter as cb
 from openai import OpenAI # for calling the OpenAI API
-import pandas as pd  # for storing text and embeddings data
-import tiktoken  # for counting tokens
-import os # for getting API token from env variable OPENAI_API_KEY
-from scipy import spatial  # for calculating vector similarities for search
-import json
+import pandas as pd  # for DataFrames to store article sections and embeddings
 
 
-# models
-EMBEDDING_MODEL = "text-embedding-3-small"
-GPT_MODEL = "gpt-3.5-turbo"
-
-client = OpenAI(
+openai_client = OpenAI(
   organization='org-M7JuSsksoyQIdQOGaTgA2wkk',
   project='proj_E0H6uUDUEkSZfn0jdmqy206G',
 )
 
-#### HELPER FUNCTIONS ###
-# Format a JSON string so it is easy to read.
-def show_json(obj):
-    print(json.dumps(json.loads(obj.model_dump_json()), indent=2))
-
-
-# Pretty printing helper
-def pretty_print(messages):
-    print("# Messages")
-    for m in messages:
-        print(f"{m.role}: {m.content[0].text.value}")
-    print()
-
-
 # download pre-chunked text and pre-computed embeddings
-embeddings_path = "data/gem_wiki.csv"
+embeddings_path = "data/embedding_gem_wiki.csv"
+embedder = cb.Embedder(openai_client)
+df = embedder.load_embeddings_from_csv(embeddings_path)
 
-df = pd.read_csv(embeddings_path)
-# convert embeddings from CSV str type back to list type
-df['embedding'] = df['embedding'].apply(ast.literal_eval)
-# the dataframe has two columns: "text" and "embedding"
-# print(df)
-
-# search function
-def strings_ranked_by_relatedness(
-    query: str,
-    df: pd.DataFrame,
-    relatedness_fn=lambda x, y: 1 - spatial.distance.cosine(x, y),
-    top_n: int = 100
-) -> tuple[list[str], list[float]]:
-    """Returns a list of strings and relatednesses, sorted from most related to least."""
-    query_embedding_response = client.embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=query,
-    )
-    query_embedding = query_embedding_response.data[0].embedding
-    strings_and_relatednesses = [
-        (row["text"], relatedness_fn(query_embedding, row["embedding"]))
-        for i, row in df.iterrows()
-    ]
-    strings_and_relatednesses.sort(key=lambda x: x[1], reverse=True)
-    strings, relatednesses = zip(*strings_and_relatednesses)
-    return strings[:top_n], relatednesses[:top_n]
-
-# # examples of strings ranked by relatedness
-# strings, relatednesses = strings_ranked_by_relatedness("Wisconsin", df, top_n=5)
-# for string, relatedness in zip(strings, relatednesses):
-#     print(f"{relatedness=:.3f}")
-#     print(string)
-
-
-def num_tokens(text: str, model: str = GPT_MODEL) -> int:
-    """Return the number of tokens in a string."""
-    encoding = tiktoken.encoding_for_model(model)
-    return len(encoding.encode(text))
-
-
-def query_message(
-    query: str,
-    df: pd.DataFrame,
-    model: str,
-    token_budget: int
-) -> str:
-    """Return a message for GPT, with relevant source texts pulled from a dataframe."""
-    strings, relatednesses = strings_ranked_by_relatedness(query, df)
-    introduction = 'Use the below articles from the Global Energy Monitor wiki to answer questions. If the answer cannot be found in the articles, write "I could not find an answer."'
-    question = f"\n\nQuestion: {query}"
-    message = introduction
-    for string in strings:
-        next_article = f'\n\nGlobal Energy Monitor section:\n"""\n{string}\n"""'
-        if (
-            num_tokens(message + next_article + question, model=model)
-            > token_budget
-        ):
-            break
-        else:
-            message += next_article
-    return message + question
-
-
-def ask(
-    query: str,
-    df: pd.DataFrame = df,
-    model: str = GPT_MODEL,
-    token_budget: int = 4096 - 500,
-    print_message: bool = False,
-) -> str:
-    print("\nQuestion:", query)
-    """Answers a query using GPT and a dataframe of relevant texts and embeddings."""
-    message = query_message(query, df, model=model, token_budget=token_budget)
-    if print_message:
-        print(message)
-    messages = [
-        {"role": "system", "content": "You answer questions about sustainable energy in Wisconsin."},
-        {"role": "user", "content": message},
-    ]
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=0
-    )
-    response_message = response.choices[0].message.content
-    return response_message
-
-# Question about a facility
-print(ask('What coal-burning power plants have been retired since 2020?', model="gpt-4"))
-# Question about a facility
-print(ask('Who provides financing to the Nelson Dewey Generating Facility?', model="gpt-4"))
-# Activities for an organization
-print(ask('What are some activities in 2022 for RENEW Wisconsin?', model="gpt-4"))
-# Another RENEW Wisconsin question.
-print(ask('Where is RENEW Wisconsin based?'))
-# A more general question.
-print(ask('Tell me about RENEW Wisconsin.'))
-# Policies and programs
-print(ask('What policies and programs does RENEW Wisconsin promote?'))
-# comparison question
-print(ask('What is the mission of Clean Wisconsin?'))
-# Relationships
-print(ask('What is the relationship between Clean Wisconsin and RENEW Wisconsin?'))
-# Get a list of nonprofits
-print(ask('What nonprofits in Wisconsin are advocating for renewable energy?'))
-# Get a list of companies
-print(ask('What companies in Wisconsin are investing in renewable energy?'))
-# Coal plant shutdowns
-print(ask('What coal-burning power plants have been shut down in Wisconsin?'))
-# open-ended question
-print(ask("How did COVID-19 affect Wisconsin?"))
-
+print(embedder.ask('Where is the SUKELCO Solar Power Plant located?', df))
+print(embedder.ask('Tell me about the Peace River Area 2 Oil and Gas Project.', df))
+print(embedder.ask('What coal-burning power plants have been retired since 2020?', df))
+print(embedder.ask('Tell me about the Nelson Dewey Generating Facility.', df))
+print(embedder.ask('What nonprofits in Wisconsin are advocating for renewable energy?', df))
+print(embedder.ask('What companies in Wisconsin are investing in renewable energy?', df))
+print(embedder.ask('What coal-burning power plants have been shut down in Wisconsin?', df))
+print(embedder.ask('What coal-burning power plants have been retired since 2020?', df))
+print(embedder.ask('What companies in Wisconsin are investing in renewable energy?', df))
+print(embedder.ask('What are some solar power plants that are currently operating in Colorado?', df))
+print(embedder.ask('Name some organizations that are advocating for renewable energy in the United States.', df))
+print(embedder.ask('What are some front groups for the fossil fuel industry?', df))
+print(embedder.ask('Describe the activities of the fossil fuel industry\'s front groups.', df))
+print(embedder.ask('What are some effective ways to advocate for action on climate change?', df))
+print(embedder.ask('Name some innovative businesses that are working to address climate change.', df))
+print(embedder.ask('Tell me about Arch Coal.', df))
+print(embedder.ask('What are some fossil fuel companies that have filed for bankruptcy?', df))
+print(embedder.ask('I\'m working on a book about climate change and political polarization in the United States. Please review the articles in the GEM wiki and write an outline for a book chapter that will talk about organizations working to address the problem and the challenges that they are facing in today\'s political climate.', df))

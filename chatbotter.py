@@ -1,5 +1,5 @@
 """
-embedding_gem_pinecone_sqlite.py:
+chatbotter.py:
 Generates embeddings from the GEM wiki, saves the embeddings in Pinecone,
 and saves the article segments in sqlite.
 
@@ -23,6 +23,22 @@ import time
 import numpy as np
 import sqlite3
 import itertools
+import ast  # for converting embeddings saved as strings back to arrays
+from scipy import spatial  # for calculating vector similarities for search
+
+
+#### HELPER FUNCTIONS ###
+# Format a JSON string so it is easy to read.
+def show_json(obj):
+    print(json.dumps(json.loads(obj.model_dump_json()), indent=2))
+
+
+# Pretty printing helper
+def pretty_print(messages):
+    print("# Messages")
+    for m in messages:
+        print(f"{m.role}: {m.content[0].text.value}")
+    print()
 
 
 # Models a simple batch generator that make chunks out of an input DataFrame
@@ -144,8 +160,6 @@ class WikiExtractor:
         text = text.strip()
         return (titles, text)
 
-
-
     # filter out short/blank sections
     def keep_section(self, section: tuple[list[str], str]) -> bool:
         """Return True if the section should be kept, False otherwise."""
@@ -155,12 +169,10 @@ class WikiExtractor:
         else:
             return True
 
-
     def num_tokens(self, text: str) -> int:
         """Return the number of tokens in a string."""
         encoding = tiktoken.encoding_for_model(self.gpt_model)
         return len(encoding.encode(text))
-
 
     def halved_by_delimiter(self, string: str, delimiter: str = "\n") -> list[str, str]:
         """Split a string in two, on a delimiter, trying to balance tokens on each side."""
@@ -185,7 +197,6 @@ class WikiExtractor:
             right = delimiter.join(chunks[i:])
             return [left, right]
 
-
     def truncated_string(
         self,
         string: str,
@@ -199,7 +210,6 @@ class WikiExtractor:
         if print_warning and len(encoded_string) > max_tokens:
             print(f"Warning: Truncated string from {len(encoded_string)} tokens to {max_tokens} tokens.")
         return truncated_string
-
 
     def split_strings_from_subsection(
         self,
@@ -224,7 +234,7 @@ class WikiExtractor:
         else:
             titles, text = subsection
             for delimiter in ["\n\n", "\n", ". "]:
-                left, right = halved_by_delimiter(text, delimiter=delimiter)
+                left, right = self.halved_by_delimiter(text, delimiter=delimiter)
                 if left == "" or right == "":
                     # if either half is empty, retry with a more fine-grained delimiter
                     continue
@@ -233,7 +243,7 @@ class WikiExtractor:
                     results = []
                     for half in [left, right]:
                         half_subsection = (titles, half)
-                        half_strings = split_strings_from_subsection(
+                        half_strings = self.split_strings_from_subsection(
                             half_subsection,
                             max_tokens=max_tokens,
                             max_recursion=max_recursion - 1,
@@ -281,19 +291,22 @@ class Embedder:
         openai_client,
         batch_size = 1000,
         embedding_model = "text-embedding-3-small",
+        gpt_model: str = "gpt-3.5-turbo",  # selects which tokenizer to use
         debug = False
     ) -> None:
         self.openai_client = openai_client
         self.batch_size = batch_size
         self.embedding_model = embedding_model
+        self.gpt_model = gpt_model
         self.debug = debug
+        self.urls = {}
 
     def get_first_line(self, text):
         return text.split('\n')[0]
 
     def get_url(self, title):
-        if title in urls.keys():
-            return urls[title]
+        if title in self.urls.keys():
+            return self.urls[title]
         else:
             return ''
 
@@ -309,6 +322,7 @@ class Embedder:
 
     def compile_embeddings(self, wikipedia_strings, urls):
         embeddings = []
+        self.urls = urls
         for batch_start in range(0, len(wikipedia_strings), self.batch_size):
             batch_end = batch_start + self.batch_size
             batch = wikipedia_strings[batch_start:batch_end]
@@ -335,6 +349,105 @@ class Embedder:
                 print(value)
 
         return df
+
+    def load_embeddings_from_csv(self, embeddings_path):
+        df = pd.read_csv(embeddings_path)
+        # convert embeddings from CSV str type back to list type
+        df['embedding'] = df['embedding'].apply(ast.literal_eval)
+        # the dataframe has two columns: "text" and "embedding"
+        if self.debug:
+            print(df)
+        return df
+
+    # search function
+    def strings_ranked_by_relatedness(
+        self,
+        query: str,
+        df: pd.DataFrame,
+        relatedness_fn=lambda x, y: 1 - spatial.distance.cosine(x, y),
+        top_n: int = 100
+    ) -> tuple[list[str], list[float]]:
+        """Returns a list of strings and relatednesses, sorted from most related to least."""
+        query_embedding_response = self.openai_client.embeddings.create(
+            model=self.embedding_model,
+            input=query,
+        )
+        query_embedding = query_embedding_response.data[0].embedding
+        strings_and_relatednesses = [
+            (row["text"], relatedness_fn(query_embedding, row["embedding"]))
+            for i, row in df.iterrows()
+        ]
+        strings_and_relatednesses.sort(key=lambda x: x[1], reverse=True)
+        strings, relatednesses = zip(*strings_and_relatednesses)
+        return strings[:top_n], relatednesses[:top_n]
+
+# # examples of strings ranked by relatedness
+# strings, relatednesses = strings_ranked_by_relatedness("Wisconsin", df, top_n=5)
+# for string, relatedness in zip(strings, relatednesses):
+#     print(f"{relatedness=:.3f}")
+#     print(string)
+
+    def num_tokens(self, text: str) -> int:
+        """Return the number of tokens in a string."""
+        encoding = tiktoken.encoding_for_model(self.gpt_model)
+        return len(encoding.encode(text))
+
+    def query_message(
+        self,
+        query: str,
+        df: pd.DataFrame,
+        token_budget: int,
+        introduction: str = 'Use the below articles from the Global Energy Monitor wiki to answer questions. If the answer cannot be found in the articles, write "I could not find an answer."',
+        string_divider: str = 'Global Energy Monitor section:'
+    ) -> str:
+        """Return a message for GPT, with relevant source texts pulled from a dataframe."""
+        strings, relatednesses = self.strings_ranked_by_relatedness(query, df)
+        introduction = introduction
+        question = f"\n\nQuestion: {query}"
+        message = introduction
+        for string in strings:
+            next_article = f'\n\n{string_divider}\n"""\n{string}\n"""'
+            if (
+                self.num_tokens(message + next_article + question)
+                > token_budget
+            ):
+                break
+            else:
+                message += next_article
+        return message + question
+
+    def ask(
+        self,
+        query: str,
+        df: pd.DataFrame,
+        token_budget: int = 4096 - 500,
+        print_message: bool = False,
+    ) -> str:
+        print("\nQuestion:", query)
+        """Answers a query using GPT and a dataframe of relevant texts and embeddings."""
+        message = self.query_message(query, df, token_budget=token_budget)
+        if self.debug:
+            print(message)
+        messages = [
+            {"role": "system", "content": "You answer questions about sustainable energy in Wisconsin."},
+            {"role": "user", "content": message},
+        ]
+        response = self.openai_client.chat.completions.create(
+            model=self.gpt_model,
+            messages=messages,
+            temperature=0
+        )
+        response_message = response.choices[0].message.content
+        return response_message
+
+
+
+
+
+
+
+
+
 
 
 # Models a simple batch generator that make chunks out of an input DataFrame
@@ -525,21 +638,37 @@ class Storer:
         return df
 
 
-extractor = WikiExtractor(debug=True)
-wiki_strings, urls = extractor.compile_wiki_strings()
-openai_client = OpenAI(
-    organization='org-M7JuSsksoyQIdQOGaTgA2wkk',
-    project='proj_E0H6uUDUEkSZfn0jdmqy206G'
-)
-embedder = Embedder(openai_client, debug=True)
-df = embedder.compile_embeddings(wiki_strings, urls)
-storage = Storer(openai_client, df, overwrite_db = True, overwrite_pinecone = True, debug=True)
-query_output = storage.query_article('Clean Coal','content')
-print(query_output)
-content_query_output = storage.query_article("Wipperdorf",'content')
-print(content_query_output)
+if __name__ == "__main__":
+    extractor = WikiExtractor()
+    wiki_strings, urls = extractor.compile_wiki_strings()
+    openai_client = OpenAI(
+        organization='org-M7JuSsksoyQIdQOGaTgA2wkk',
+        project='proj_E0H6uUDUEkSZfn0jdmqy206G'
+    )
+
+    embedder = Embedder(openai_client)
+    df = embedder.compile_embeddings(wiki_strings, urls)
+
+    storage = Storer(openai_client, df, overwrite_db = True, overwrite_pinecone = True)
+    query_output = storage.query_article('Clean Coal','content')
+    print(query_output)
+    content_query_output = storage.query_article("Wipperdorf",'content')
+    print(content_query_output)
 
 
+    # extractor = WikiExtractor(debug=True)
+    # wiki_strings, urls = extractor.compile_wiki_strings()
+    # openai_client = OpenAI(
+    #     organization='org-M7JuSsksoyQIdQOGaTgA2wkk',
+    #     project='proj_E0H6uUDUEkSZfn0jdmqy206G'
+    # )
+    # embedder = Embedder(openai_client, debug=True)
+    # df = embedder.compile_embeddings(wiki_strings, urls)
+    # storage = Storer(openai_client, df, overwrite_db = True, overwrite_pinecone = True, debug=True)
+    # query_output = storage.query_article('Clean Coal','content')
+    # print(query_output)
+    # content_query_output = storage.query_article("Wipperdorf",'content')
+    # print(content_query_output)
 
 
 # client = OpenAI(organization=organization, project=project)
