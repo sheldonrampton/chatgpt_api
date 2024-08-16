@@ -22,7 +22,7 @@ embeddings_path = "data/embedding_gem_wiki.csv"
 embedder = cb.Embedder(openai_client)
 
 asker = cb.Asker(openai_client)
-# asker.load_embeddings_from_csv(embeddings_path)
+asker.load_embeddings_from_csv(embeddings_path)
 print(asker.ask('Where is the SUKELCO Solar Power Plant located?'))
 print(asker.ask('Tell me about the Peace River Area 2 Oil and Gas Project.'))
 print(asker.ask('What coal-burning power plants have been retired since 2020?'))

@@ -85,14 +85,30 @@ class WikiExtractor:
         self: int
     ) -> set[str]:
         """Return a set of page titles in a given Wiki category and its subcategories."""
+        urls = {}
         pages = self.site.allpages()
         titles = set()
-        urls = {}
         for page in itertools.islice(pages, self.limit):
             title = page.name
             titles.add(title)
             urls[title] = self.gw.opensearch(title, results=1)[0][2]
         return titles, urls
+
+    def titles_from_category(
+        self,
+        category: mwclient.listing.Category,
+        max_depth: int
+    ) -> set[str]:
+        """Return a set of page titles in a given Wiki category and its subcategories."""
+        titles = set()
+        for cm in category.members():
+            if type(cm) == mwclient.page.Page:
+                # ^type() used instead of isinstance() to catch match w/ no inheritance
+                titles.add(cm.name)
+            elif isinstance(cm, mwclient.listing.Category) and max_depth > 0:
+                deeper_titles = self.titles_from_category(cm, max_depth=max_depth - 1)
+                titles.update(deeper_titles)
+        return titles
 
     def all_subsections_from_section(
         self, section: mwparserfromhell.wikicode.Wikicode,
@@ -249,8 +265,22 @@ class WikiExtractor:
         # otherwise no split was found, so just truncate (should be very rare)
         return [truncated_string(string, max_tokens=max_tokens)]
 
-    def compile_wiki_strings(self):
-        titles, urls = self.list_of_titles()
+    def compile_wiki_strings(
+        self,
+        category_title = None,
+        max_depth: int = 1
+    ):
+        if (category_title):
+            full_category_title = "Category:" + category_title
+            category_page = self.site.pages[full_category_title]
+            titles = self.titles_from_category(category = category_page, max_depth=1)
+            titles = set(list(titles)[:self.limit])
+            urls = {}
+            for title in titles:
+                urls[title] = self.gw.opensearch(title, results=1)[0][2]
+        else:
+            titles, urls = self.list_of_titles()
+
         # split pages into sections
         # may take ~1 minute per 100 articles
         wikipedia_sections = []
@@ -430,10 +460,13 @@ class Asker:
     def ask(
         self,
         query: str,
+        model = None,
         token_budget: int = 4096 - 500
     ) -> str:
         print("\nQuestion:", query)
         """Answers a query using GPT and a dataframe of relevant texts and embeddings."""
+        if not model:
+            model = self.gpt_model
         message = self.query_message(query, token_budget=token_budget)
         if self.debug:
             print(message)
@@ -442,7 +475,7 @@ class Asker:
             {"role": "user", "content": message},
         ]
         response = self.openai_client.chat.completions.create(
-            model=self.gpt_model,
+            model=model,
             messages=messages,
             temperature=0
         )
