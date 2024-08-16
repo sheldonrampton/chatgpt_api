@@ -440,22 +440,73 @@ class Asker:
     def query_message(
         self,
         query: str,
-        token_budget: int
+        token_budget: int,
+        storage = None
     ) -> str:
         """Return a message for GPT, with relevant source texts pulled from a dataframe."""
-        strings, relatednesses = self.strings_ranked_by_relatedness(query)
-        question = f"\n\nQuestion: {query}"
-        message = self.introduction
-        for string in strings:
-            next_article = f'\n\n{self.string_divider}\n"""\n{string}\n"""'
-            if (
-                self.num_tokens(message + next_article + question)
-                > token_budget
-            ):
-                break
-            else:
-                message += next_article
-        return message + question
+        articles = {}
+        if storage:
+            df = storage.get_pinecone_matches(query)
+            question = f"\n\nQuestion: {query}"
+            message = self.introduction
+            for k,v in df.iterrows():
+                string = v.content
+                title = v.title
+                url = v.url
+                articles[title] = url
+                next_article = f'\n\n{self.string_divider}\n"""\n{string}\n"""'
+                if (
+                    self.num_tokens(message + next_article + question)
+                    > token_budget
+                ):
+                    break
+                else:
+                    message += next_article
+        else:
+            strings, relatednesses = self.strings_ranked_by_relatedness(query)
+            question = f"\n\nQuestion: {query}"
+            message = self.introduction
+            for string in strings:
+                next_article = f'\n\n{self.string_divider}\n"""\n{string}\n"""'
+                if (
+                    self.num_tokens(message + next_article + question)
+                    > token_budget
+                ):
+                    break
+                else:
+                    message += next_article
+        return message + question, articles
+
+    def ask_storage(self,
+        query,
+        storage,
+        model = None,
+        token_budget: int = 4096 - 500
+    ):
+        """Answers a query using GPT and a dataframe of relevant texts and embeddings."""
+        if not model:
+            model = self.gpt_model
+        message, articles = self.query_message(query, token_budget=token_budget, storage=storage)
+        if self.debug:
+            print(message)
+        messages = [
+            {"role": "system", "content": "You answer questions about sustainable energy and other activities related to climate change and global warming."},
+            {"role": "user", "content": message},
+        ]
+        response = self.openai_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0
+        )
+        response_message = response.choices[0].message.content
+        # print(response_message)
+
+        references = "<p><b>For more information:</b></p><ul>"
+        for title, url in articles.items():
+            references += "<li><a href=\"" + url  + "\">" + title + "</a></li>"
+        references += "</ul>"
+
+        return response_message + references
 
     def ask(
         self,
@@ -526,7 +577,8 @@ class Storer:
         self.debug = debug
         self.setup_database()
         self.setup_pinecone()
-        self.upsert_data()
+        if df:
+            self.upsert_data()
 
     def setup_database(self):
         if os.path.exists(self.db_path) and self.overwrite_db:
@@ -628,6 +680,50 @@ class Storer:
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
             return None
+
+    # search function
+    def get_pinecone_matches(
+        self,
+        query: str,
+        top_n: int = 100
+    ) -> tuple[list[str], list[float]]:
+        """Returns a list of strings and relatednesses, sorted from most related to least."""
+        query_embedding_response = self.openai_client.embeddings.create(
+            model=self.embedding_model,
+            input=query,
+        )
+        query_embedding = query_embedding_response.data[0].embedding
+
+        res = self.openai_client.embeddings.create(input=[query], model=self.embedding_model)
+        embedded_query = res.data[0].embedding
+
+        # Query namespace passed as parameter using title vector
+        query_result = self.pinecone_index.query(
+            namespace='content',
+            vector=embedded_query,
+            top_k=top_n
+        )
+
+        print(f'\nMost similar results to {query} in "content" namespace:\n')
+        if not query_result.matches:
+            print('no query result')
+        
+        matches = query_result.matches
+        ids = [res.id for res in matches]
+        scores = [res.score for res in matches]
+        df = pd.DataFrame({'id':ids, 
+                           'score':scores,
+                           })
+        
+        df['title'], df['url'], df['content'] = zip(*df['id'].apply(lambda x: self.get_article_chunk(x)))
+
+        counter = 0
+        # for k,v in df.iterrows():
+        #     counter += 1
+        #     print(f'{v.title} (score = {v.score})')
+
+        # print('\n')
+        return df
 
     def query_article(self, query, namespace, top_k=5):
         '''Queries an article using its title in the specified
