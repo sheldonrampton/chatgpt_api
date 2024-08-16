@@ -43,7 +43,6 @@ def pretty_print(messages):
 
 # Models a simple batch generator that make chunks out of an input DataFrame
 class WikiExtractor:
-
     def __init__(self,
         site_name: str = "www.gem.wiki",
         url: str = 'https://www.gem.wiki/w/api.php',
@@ -95,7 +94,6 @@ class WikiExtractor:
             urls[title] = self.gw.opensearch(title, results=1)[0][2]
         return titles, urls
 
-
     def all_subsections_from_section(
         self, section: mwparserfromhell.wikicode.Wikicode,
         parent_titles: list[str],
@@ -124,7 +122,6 @@ class WikiExtractor:
                 results.extend(self.all_subsections_from_section(subsection, titles))
             return results
 
-
     def all_subsections_from_title(
         self,
         title: str,
@@ -146,7 +143,6 @@ class WikiExtractor:
         for subsection in parsed_text.get_sections(levels=[2]):
             results.extend(self.all_subsections_from_section(subsection, [title]))
         return results
-
 
     # clean text
     def clean_section(self, section: tuple[list[str], str]) -> tuple[list[str], str]:
@@ -350,6 +346,26 @@ class Embedder:
 
         return df
 
+
+class Asker:
+    def __init__(
+        self,
+        openai_client,
+        df: pd.DataFrame = None,
+        embedding_model = "text-embedding-3-small",
+        gpt_model: str = "gpt-3.5-turbo",  # selects which tokenizer to use
+        introduction: str = 'Use the below articles from the Global Energy Monitor wiki to answer questions. If the answer cannot be found in the articles, write "I could not find an answer."',
+        string_divider: str = 'Global Energy Monitor section:',
+        debug = False
+    ) -> None:
+        self.openai_client = openai_client
+        self.embedding_model = embedding_model
+        self.gpt_model = gpt_model
+        self.debug = debug
+        self.introduction = introduction
+        self.string_divider = string_divider
+        self.df = df
+
     def load_embeddings_from_csv(self, embeddings_path):
         df = pd.read_csv(embeddings_path)
         # convert embeddings from CSV str type back to list type
@@ -357,13 +373,18 @@ class Embedder:
         # the dataframe has two columns: "text" and "embedding"
         if self.debug:
             print(df)
+        self.df = df
         return df
 
     # search function
     def strings_ranked_by_relatedness(
+        # # examples of strings ranked by relatedness
+        # strings, relatednesses = strings_ranked_by_relatedness("Wisconsin", top_n=5)
+        # for string, relatedness in zip(strings, relatednesses):
+        #     print(f"{relatedness=:.3f}")
+        #     print(string)
         self,
         query: str,
-        df: pd.DataFrame,
         relatedness_fn=lambda x, y: 1 - spatial.distance.cosine(x, y),
         top_n: int = 100
     ) -> tuple[list[str], list[float]]:
@@ -375,17 +396,11 @@ class Embedder:
         query_embedding = query_embedding_response.data[0].embedding
         strings_and_relatednesses = [
             (row["text"], relatedness_fn(query_embedding, row["embedding"]))
-            for i, row in df.iterrows()
+            for i, row in self.df.iterrows()
         ]
         strings_and_relatednesses.sort(key=lambda x: x[1], reverse=True)
         strings, relatednesses = zip(*strings_and_relatednesses)
         return strings[:top_n], relatednesses[:top_n]
-
-# # examples of strings ranked by relatedness
-# strings, relatednesses = strings_ranked_by_relatedness("Wisconsin", df, top_n=5)
-# for string, relatedness in zip(strings, relatednesses):
-#     print(f"{relatedness=:.3f}")
-#     print(string)
 
     def num_tokens(self, text: str) -> int:
         """Return the number of tokens in a string."""
@@ -395,18 +410,14 @@ class Embedder:
     def query_message(
         self,
         query: str,
-        df: pd.DataFrame,
-        token_budget: int,
-        introduction: str = 'Use the below articles from the Global Energy Monitor wiki to answer questions. If the answer cannot be found in the articles, write "I could not find an answer."',
-        string_divider: str = 'Global Energy Monitor section:'
+        token_budget: int
     ) -> str:
         """Return a message for GPT, with relevant source texts pulled from a dataframe."""
-        strings, relatednesses = self.strings_ranked_by_relatedness(query, df)
-        introduction = introduction
+        strings, relatednesses = self.strings_ranked_by_relatedness(query)
         question = f"\n\nQuestion: {query}"
-        message = introduction
+        message = self.introduction
         for string in strings:
-            next_article = f'\n\n{string_divider}\n"""\n{string}\n"""'
+            next_article = f'\n\n{self.string_divider}\n"""\n{string}\n"""'
             if (
                 self.num_tokens(message + next_article + question)
                 > token_budget
@@ -419,13 +430,11 @@ class Embedder:
     def ask(
         self,
         query: str,
-        df: pd.DataFrame,
-        token_budget: int = 4096 - 500,
-        print_message: bool = False,
+        token_budget: int = 4096 - 500
     ) -> str:
         print("\nQuestion:", query)
         """Answers a query using GPT and a dataframe of relevant texts and embeddings."""
-        message = self.query_message(query, df, token_budget=token_budget)
+        message = self.query_message(query, token_budget=token_budget)
         if self.debug:
             print(message)
         messages = [
@@ -441,18 +450,8 @@ class Embedder:
         return response_message
 
 
-
-
-
-
-
-
-
-
-
 # Models a simple batch generator that make chunks out of an input DataFrame
 class BatchGenerator:
-    
     def __init__(self, batch_size: int = 10) -> None:
         self.batch_size = batch_size
     
@@ -473,7 +472,6 @@ class BatchGenerator:
 
 
 class Storer:
-
     def __init__(
         self,
         openai_client,
@@ -662,8 +660,10 @@ if __name__ == "__main__":
     #     organization='org-M7JuSsksoyQIdQOGaTgA2wkk',
     #     project='proj_E0H6uUDUEkSZfn0jdmqy206G'
     # )
+    #
     # embedder = Embedder(openai_client, debug=True)
     # df = embedder.compile_embeddings(wiki_strings, urls)
+    #
     # storage = Storer(openai_client, df, overwrite_db = True, overwrite_pinecone = True, debug=True)
     # query_output = storage.query_article('Clean Coal','content')
     # print(query_output)
