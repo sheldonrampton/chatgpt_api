@@ -48,7 +48,7 @@ class WikiExtractor:
         url: str = 'https://www.gem.wiki/w/api.php',
         user_agent: str = 'sheldon-ramptons-agent',
         gpt_model: str = "gpt-3.5-turbo",  # selects which tokenizer to use
-        limit: int = 50,
+        limit: False,
         debug = False
     ) -> None:
         self.site_name = site_name
@@ -88,7 +88,9 @@ class WikiExtractor:
         urls = {}
         pages = self.site.allpages()
         titles = set()
-        for page in itertools.islice(pages, self.limit):
+        if self.limit:
+            pages = itertools.islice(pages, self.limit)
+        for page in pages:
             title = page.name
             titles.add(title)
             urls[title] = self.gw.opensearch(title, results=1)[0][2]
@@ -267,20 +269,26 @@ class WikiExtractor:
 
     def compile_wiki_strings(
         self,
-        category_title = None,
+        categories = None,
         max_depth: int = 1
     ):
-        if (category_title):
-            full_category_title = "Category:" + category_title
-            category_page = self.site.pages[full_category_title]
-            titles = self.titles_from_category(category = category_page, max_depth=1)
-            titles = set(list(titles)[:self.limit])
+        if isinstance(categories, str):
+            categories = [categories]
+        if categories:
+            all_titles = set()
+            for category_title in categories:
+                full_category_title = "Category:" + category_title
+                category_page = self.site.pages[full_category_title]
+                titles = self.titles_from_category(category = category_page, max_depth=max_depth)
+                all_titles = all_titles.union(titles)
+            titles = all_titles
+            if self.limit:
+                titles = set(list(titles)[:self.limit])
             urls = {}
             for title in titles:
                 urls[title] = self.gw.opensearch(title, results=1)[0][2]
         else:
             titles, urls = self.list_of_titles()
-
         # split pages into sections
         # may take ~1 minute per 100 articles
         wikipedia_sections = []
@@ -382,6 +390,7 @@ class Asker:
         self,
         openai_client,
         df: pd.DataFrame = None,
+        storage = None,
         embedding_model = "text-embedding-3-small",
         gpt_model: str = "gpt-3.5-turbo",  # selects which tokenizer to use
         introduction: str = 'Use the below articles from the Global Energy Monitor wiki to answer questions. If the answer cannot be found in the articles, write "I could not find an answer."',
@@ -395,6 +404,7 @@ class Asker:
         self.introduction = introduction
         self.string_divider = string_divider
         self.df = df
+        self.storage = storage
 
     def load_embeddings_from_csv(self, embeddings_path):
         df = pd.read_csv(embeddings_path)
@@ -445,8 +455,8 @@ class Asker:
     ) -> str:
         """Return a message for GPT, with relevant source texts pulled from a dataframe."""
         articles = {}
-        if storage:
-            df = storage.get_pinecone_matches(query)
+        if self.storage:
+            df = self.storage.get_pinecone_matches(query)
             question = f"\n\nQuestion: {query}"
             message = self.introduction
             for k,v in df.iterrows():
@@ -477,16 +487,16 @@ class Asker:
                     message += next_article
         return message + question, articles
 
-    def ask_storage(self,
+    def ask(
+        self,
         query,
-        storage,
         model = None,
         token_budget: int = 4096 - 500
     ):
         """Answers a query using GPT and a dataframe of relevant texts and embeddings."""
         if not model:
             model = self.gpt_model
-        message, articles = self.query_message(query, token_budget=token_budget, storage=storage)
+        message, articles = self.query_message(query, token_budget=token_budget)
         if self.debug:
             print(message)
         messages = [
@@ -499,39 +509,14 @@ class Asker:
             temperature=0
         )
         response_message = response.choices[0].message.content
-        # print(response_message)
 
         references = "<p><b>For more information:</b></p><ul>"
         for title, url in articles.items():
             references += "<li><a href=\"" + url  + "\">" + title + "</a></li>"
         references += "</ul>"
 
-        return response_message + references
-
-    def ask(
-        self,
-        query: str,
-        model = None,
-        token_budget: int = 4096 - 500
-    ) -> str:
-        print("\nQuestion:", query)
-        """Answers a query using GPT and a dataframe of relevant texts and embeddings."""
-        if not model:
-            model = self.gpt_model
-        message = self.query_message(query, token_budget=token_budget)
-        if self.debug:
-            print(message)
-        messages = [
-            {"role": "system", "content": "You answer questions about sustainable energy in Wisconsin."},
-            {"role": "user", "content": message},
-        ]
-        response = self.openai_client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0
-        )
-        response_message = response.choices[0].message.content
-        return response_message
+        # print(response_message)
+        return response_message, references, articles
 
 
 # Models a simple batch generator that make chunks out of an input DataFrame
@@ -559,7 +544,7 @@ class Storer:
     def __init__(
         self,
         openai_client,
-        df,
+        df = None,
         db_path = 'gem_wiki_50.db',
         pinecone_index_name = 'gem-wiki-50',
         embedding_model = "text-embedding-3-small",
@@ -611,9 +596,15 @@ class Storer:
                 cloud="aws",
                 region="us-east-1"
             )
+            # Calculate length of embedding based on the embedding model.
+            response = self.openai_client.embeddings.create(
+              input="Hello!",
+              model=self.embedding_model
+            )
+            embedding_length = len(response.data[0].embedding)
             pinecone.create_index(
                 self.pinecone_index_name,
-                dimension=len(self.df['embedding'][0]),
+                dimension=embedding_length,
                 metric='cosine',
                 spec=spec
             )

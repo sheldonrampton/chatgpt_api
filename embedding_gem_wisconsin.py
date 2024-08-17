@@ -16,7 +16,7 @@ import pandas as pd  # for DataFrames to store article sections and embeddings
 
 # limit = 20
 extractor = cb.WikiExtractor()
-wiki_strings, urls = extractor.compile_wiki_strings(category_title = 'Wisconsin')
+wiki_strings, urls = extractor.compile_wiki_strings(categories = 'Wisconsin')
 openai_client = OpenAI(
     organization='org-M7JuSsksoyQIdQOGaTgA2wkk',
     project='proj_E0H6uUDUEkSZfn0jdmqy206G'
