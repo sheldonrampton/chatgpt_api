@@ -305,32 +305,32 @@ class WikiExtractor:
         titles, urls, category_names = self.compile_titles(categories = categories, max_depth = max_depth)
         # split pages into sections
         # may take ~1 minute per 100 articles
-        wikipedia_sections = []
+        wiki_sections = []
         for title in titles:
-            wikipedia_sections.extend(self.all_subsections_from_title(title))
+            wiki_sections.extend(self.all_subsections_from_title(title))
         if self.debug:
-            print(f"Found {len(wikipedia_sections)} sections in {len(titles)} pages.")
-        wikipedia_sections = [self.clean_section(ws) for ws in wikipedia_sections]
-        original_num_sections = len(wikipedia_sections)
-        wikipedia_sections = [ws for ws in wikipedia_sections if self.keep_section(ws)]
+            print(f"Found {len(wiki_sections)} sections in {len(titles)} pages.")
+        wiki_sections = [self.clean_section(ws) for ws in wiki_sections]
+        original_num_sections = len(wiki_sections)
+        wiki_sections = [ws for ws in wiki_sections if self.keep_section(ws)]
         if self.debug:
-            print(f"Filtered out {original_num_sections-len(wikipedia_sections)} sections, leaving {len(wikipedia_sections)} sections.")
+            print(f"Filtered out {original_num_sections-len(wiki_sections)} sections, leaving {len(wiki_sections)} sections.")
             # print example data
-            for ws in wikipedia_sections[:5]:
+            for ws in wiki_sections[:5]:
                 print(ws[0])
                 print(ws[1][:77] + "...")
                 print()
         # split sections into chunks
         MAX_TOKENS = 1600
-        wikipedia_strings = []
-        for section in wikipedia_sections:
-            wikipedia_strings.extend(self.split_strings_from_subsection(section, max_tokens=MAX_TOKENS))
+        strings = []
+        for section in wiki_sections:
+            strings.extend(self.split_strings_from_subsection(section, max_tokens=MAX_TOKENS))
 
         if self.debug:
-            print(f"{len(wikipedia_sections)} Wikipedia sections split into {len(wikipedia_strings)} strings.")
+            print(f"{len(wiki_sections)} Wikipedia sections split into {len(strings)} strings.")
             # print example data
-            print(wikipedia_strings[1])
-        return wikipedia_strings, urls
+            print(strings[1])
+        return strings, urls
 
 
 class Embedder:
@@ -368,12 +368,12 @@ class Embedder:
         # Return the hexadecimal digest of the hash, which is a string representation of the hash
         return hash_object.hexdigest()
 
-    def compile_embeddings(self, wikipedia_strings, urls):
+    def compile_embeddings(self, strings, urls):
         embeddings = []
         self.urls = urls
-        for batch_start in range(0, len(wikipedia_strings), self.batch_size):
+        for batch_start in range(0, len(strings), self.batch_size):
             batch_end = batch_start + self.batch_size
-            batch = wikipedia_strings[batch_start:batch_end]
+            batch = strings[batch_start:batch_end]
             if self.debug:
                 print(f"Batch {batch_start} to {batch_end-1}")
             response = self.openai_client.embeddings.create(model=self.embedding_model, input=batch)
@@ -382,10 +382,9 @@ class Embedder:
             batch_embeddings = [e.embedding for e in response.data]
             embeddings.extend(batch_embeddings)
 
-        df = pd.DataFrame({"text": wikipedia_strings, "embedding": embeddings})
+        df = pd.DataFrame({"text": strings, "embedding": embeddings})
         df["title"] = df['text'].apply(self.get_first_line)
         df["url"] = df['title'].apply(self.get_url)
-        # df["vector_id"] = df['text'].apply(self.generate_vector_id)
         df["vector_id"] = df.apply(lambda row: self.generate_vector_id(row['url'] + row['text']), axis=1)
 
         if self.debug:
