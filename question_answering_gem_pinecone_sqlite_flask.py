@@ -45,7 +45,7 @@ client = OpenAI(
 pinecone_api_key = os.environ.get('PINECONE_API_KEY')
 pinecone = Pinecone(api_key=pinecone_api_key)
 # index_name = 'gem-wiki-test'
-index_name = 'gem-wiki-10000'
+index_name = 'wikipedia-climate-change'
 # connect to index
 index = pinecone.Index(index_name)
 
@@ -74,7 +74,7 @@ def pretty_print(messages):
 
 
 def get_article_chunk(unique_id):
-    conn = sqlite3.connect('gem_wiki.db')
+    conn = sqlite3.connect('wikipedia-climate-change.db')
     cursor = conn.cursor()
     # SQL query to retrieve the row with the specified unique_id
     query = "SELECT title, url, content FROM ArticleChunks WHERE unique_id = ?"

@@ -47,8 +47,8 @@ class WikiExtractor:
         site_name: str = "www.gem.wiki",
         url: str = 'https://www.gem.wiki/w/api.php',
         user_agent: str = 'sheldon-ramptons-agent',
-        gpt_model: str = "gpt-3.5-turbo",  # selects which tokenizer to use
-        limit: False,
+        gpt_model: str = "gpt-4o",  # selects which tokenizer to use
+        limit = False,
         debug = False
     ) -> None:
         self.site_name = site_name
@@ -99,6 +99,7 @@ class WikiExtractor:
     def titles_from_category(
         self,
         category: mwclient.listing.Category,
+        category_names,
         max_depth: int
     ) -> set[str]:
         """Return a set of page titles in a given Wiki category and its subcategories."""
@@ -108,9 +109,10 @@ class WikiExtractor:
                 # ^type() used instead of isinstance() to catch match w/ no inheritance
                 titles.add(cm.name)
             elif isinstance(cm, mwclient.listing.Category) and max_depth > 0:
-                deeper_titles = self.titles_from_category(cm, max_depth=max_depth - 1)
+                category_names.add(cm.name)
+                deeper_titles, category_names = self.titles_from_category(cm, category_names = category_names, max_depth=max_depth - 1)
                 titles.update(deeper_titles)
-        return titles
+        return titles, category_names
 
     def all_subsections_from_section(
         self, section: mwparserfromhell.wikicode.Wikicode,
@@ -222,7 +224,8 @@ class WikiExtractor:
         encoded_string = encoding.encode(string)
         truncated_string = encoding.decode(encoded_string[:max_tokens])
         if print_warning and len(encoded_string) > max_tokens:
-            print(f"Warning: Truncated string from {len(encoded_string)} tokens to {max_tokens} tokens.")
+            first_line = string.split('\n')[0]
+            print(f"Warning: Truncated string {first_line} from {len(encoded_string)} tokens to {max_tokens} tokens.")
         return truncated_string
 
     def split_strings_from_subsection(
@@ -243,7 +246,7 @@ class WikiExtractor:
             return [string]
         # if recursion hasn't found a split after X iterations, just truncate
         elif max_recursion == 0:
-            return [truncated_string(string, max_tokens=max_tokens)]
+            return [self.truncated_string(string, max_tokens=max_tokens)]
         # otherwise, split in half and recurse
         else:
             titles, text = subsection
@@ -265,9 +268,10 @@ class WikiExtractor:
                         results.extend(half_strings)
                     return results
         # otherwise no split was found, so just truncate (should be very rare)
-        return [truncated_string(string, max_tokens=max_tokens)]
+        return [self.truncated_string(string, max_tokens=max_tokens)]
 
-    def compile_wiki_strings(
+
+    def compile_titles(
         self,
         categories = None,
         max_depth: int = 1
@@ -279,7 +283,7 @@ class WikiExtractor:
             for category_title in categories:
                 full_category_title = "Category:" + category_title
                 category_page = self.site.pages[full_category_title]
-                titles = self.titles_from_category(category = category_page, max_depth=max_depth)
+                titles, category_names = self.titles_from_category(category = category_page, category_names = set(), max_depth=max_depth)
                 all_titles = all_titles.union(titles)
             titles = all_titles
             if self.limit:
@@ -289,6 +293,16 @@ class WikiExtractor:
                 urls[title] = self.gw.opensearch(title, results=1)[0][2]
         else:
             titles, urls = self.list_of_titles()
+            category_names = set()
+        return titles, urls, category_names
+
+
+    def compile_wiki_strings(
+        self,
+        categories = None,
+        max_depth: int = 1
+    ):
+        titles, urls, category_names = self.compile_titles(categories = categories, max_depth = max_depth)
         # split pages into sections
         # may take ~1 minute per 100 articles
         wikipedia_sections = []
@@ -325,7 +339,7 @@ class Embedder:
         openai_client,
         batch_size = 1000,
         embedding_model = "text-embedding-3-small",
-        gpt_model: str = "gpt-3.5-turbo",  # selects which tokenizer to use
+        gpt_model: str = "gpt-4o",  # selects which tokenizer to use
         debug = False
     ) -> None:
         self.openai_client = openai_client
@@ -371,7 +385,7 @@ class Embedder:
         df = pd.DataFrame({"text": wikipedia_strings, "embedding": embeddings})
         df["title"] = df['text'].apply(self.get_first_line)
         df["url"] = df['title'].apply(self.get_url)
-        df["vector_id"] = df['text'].apply(self.generate_vector_id)
+        # df["vector_id"] = df['text'].apply(self.generate_vector_id)
         df["vector_id"] = df.apply(lambda row: self.generate_vector_id(row['url'] + row['text']), axis=1)
 
         if self.debug:
@@ -392,7 +406,7 @@ class Asker:
         df: pd.DataFrame = None,
         storage = None,
         embedding_model = "text-embedding-3-small",
-        gpt_model: str = "gpt-3.5-turbo",  # selects which tokenizer to use
+        gpt_model: str = "gpt-4o",  # selects which tokenizer to use
         introduction: str = 'Use the below articles from the Global Energy Monitor wiki to answer questions. If the answer cannot be found in the articles, write "I could not find an answer."',
         string_divider: str = 'Global Energy Monitor section:',
         debug = False
@@ -562,7 +576,7 @@ class Storer:
         self.debug = debug
         self.setup_database()
         self.setup_pinecone()
-        if df:
+        if df is not None:
             self.upsert_data()
 
     def setup_database(self):
