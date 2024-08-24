@@ -398,140 +398,6 @@ class Embedder:
         return df
 
 
-class Asker:
-    def __init__(
-        self,
-        openai_client,
-        df: pd.DataFrame = None,
-        storage = None,
-        embedding_model = "text-embedding-3-small",
-        gpt_model: str = "gpt-4o",  # selects which tokenizer to use
-        introduction: str = 'Use the below articles from the Global Energy Monitor wiki to answer questions. If the answer cannot be found in the articles, write "I could not find an answer."',
-        string_divider: str = 'Global Energy Monitor section:',
-        debug = False
-    ) -> None:
-        self.openai_client = openai_client
-        self.embedding_model = embedding_model
-        self.gpt_model = gpt_model
-        self.debug = debug
-        self.introduction = introduction
-        self.string_divider = string_divider
-        self.df = df
-        self.storage = storage
-
-    def load_embeddings_from_csv(self, embeddings_path):
-        df = pd.read_csv(embeddings_path)
-        # convert embeddings from CSV str type back to list type
-        df['embedding'] = df['embedding'].apply(ast.literal_eval)
-        # the dataframe has two columns: "text" and "embedding"
-        if self.debug:
-            print(df)
-        self.df = df
-        return df
-
-    # search function
-    def strings_ranked_by_relatedness(
-        # # examples of strings ranked by relatedness
-        # strings, relatednesses = strings_ranked_by_relatedness("Wisconsin", top_n=5)
-        # for string, relatedness in zip(strings, relatednesses):
-        #     print(f"{relatedness=:.3f}")
-        #     print(string)
-        self,
-        query: str,
-        relatedness_fn=lambda x, y: 1 - spatial.distance.cosine(x, y),
-        top_n: int = 100
-    ) -> tuple[list[str], list[float]]:
-        """Returns a list of strings and relatednesses, sorted from most related to least."""
-        query_embedding_response = self.openai_client.embeddings.create(
-            model=self.embedding_model,
-            input=query,
-        )
-        query_embedding = query_embedding_response.data[0].embedding
-        strings_and_relatednesses = [
-            (row["text"], relatedness_fn(query_embedding, row["embedding"]))
-            for i, row in self.df.iterrows()
-        ]
-        strings_and_relatednesses.sort(key=lambda x: x[1], reverse=True)
-        strings, relatednesses = zip(*strings_and_relatednesses)
-        return strings[:top_n], relatednesses[:top_n]
-
-    def num_tokens(self, text: str) -> int:
-        """Return the number of tokens in a string."""
-        encoding = tiktoken.encoding_for_model(self.gpt_model)
-        return len(encoding.encode(text))
-
-    def query_message(
-        self,
-        query: str,
-        token_budget: int,
-        storage = None
-    ) -> str:
-        """Return a message for GPT, with relevant source texts pulled from a dataframe."""
-        articles = {}
-        if self.storage:
-            df = self.storage.get_pinecone_matches(query)
-            question = f"\n\nQuestion: {query}"
-            message = self.introduction
-            for k,v in df.iterrows():
-                string = v.content
-                title = v.title
-                url = v.url
-                articles[title] = url
-                next_article = f'\n\n{self.string_divider}\n"""\n{string}\n"""'
-                if (
-                    self.num_tokens(message + next_article + question)
-                    > token_budget
-                ):
-                    break
-                else:
-                    message += next_article
-        else:
-            strings, relatednesses = self.strings_ranked_by_relatedness(query)
-            question = f"\n\nQuestion: {query}"
-            message = self.introduction
-            for string in strings:
-                next_article = f'\n\n{self.string_divider}\n"""\n{string}\n"""'
-                if (
-                    self.num_tokens(message + next_article + question)
-                    > token_budget
-                ):
-                    break
-                else:
-                    message += next_article
-        return message + question, articles
-
-    def ask(
-        self,
-        query,
-        model = None,
-        token_budget: int = 4096 - 500
-    ):
-        """Answers a query using GPT and a dataframe of relevant texts and embeddings."""
-        if not model:
-            model = self.gpt_model
-        message, articles = self.query_message(query, token_budget=token_budget)
-        if self.debug:
-            print(message)
-        messages = [
-            {"role": "system", "content": "You answer questions about sustainable energy and other activities related to climate change and global warming."},
-            {"role": "user", "content": message},
-        ]
-        response = self.openai_client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0
-        )
-        response_message = response.choices[0].message.content
-
-        references = "<p><b>For more information:</b></p><ul>"
-        for title, url in articles.items():
-            references += "<li><a href=\"" + url  + "\">" + title + "</a></li>"
-        references += "</ul>"
-
-        # print(response_message)
-        return response_message, references, articles
-
-
 # Models a simple batch generator that make chunks out of an input DataFrame
 class BatchGenerator:
     def __init__(self, batch_size: int = 10) -> None:
@@ -769,6 +635,140 @@ class Storer:
         return df
 
 
+class Asker:
+    def __init__(
+        self,
+        openai_client,
+        df: pd.DataFrame = None,
+        storage = None,
+        embedding_model = "text-embedding-3-small",
+        gpt_model: str = "gpt-4o",  # selects which tokenizer to use
+        introduction: str = 'Use the below articles from the Global Energy Monitor wiki to answer questions. If the answer cannot be found in the articles, write "I could not find an answer."',
+        string_divider: str = 'Global Energy Monitor section:',
+        debug = False
+    ) -> None:
+        self.openai_client = openai_client
+        self.embedding_model = embedding_model
+        self.gpt_model = gpt_model
+        self.debug = debug
+        self.introduction = introduction
+        self.string_divider = string_divider
+        self.df = df
+        self.storage = storage
+
+    def load_embeddings_from_csv(self, embeddings_path):
+        df = pd.read_csv(embeddings_path)
+        # convert embeddings from CSV str type back to list type
+        df['embedding'] = df['embedding'].apply(ast.literal_eval)
+        # the dataframe has two columns: "text" and "embedding"
+        if self.debug:
+            print(df)
+        self.df = df
+        return df
+
+    # search function
+    def strings_ranked_by_relatedness(
+        # # examples of strings ranked by relatedness
+        # strings, relatednesses = strings_ranked_by_relatedness("Wisconsin", top_n=5)
+        # for string, relatedness in zip(strings, relatednesses):
+        #     print(f"{relatedness=:.3f}")
+        #     print(string)
+        self,
+        query: str,
+        relatedness_fn=lambda x, y: 1 - spatial.distance.cosine(x, y),
+        top_n: int = 100
+    ) -> tuple[list[str], list[float]]:
+        """Returns a list of strings and relatednesses, sorted from most related to least."""
+        query_embedding_response = self.openai_client.embeddings.create(
+            model=self.embedding_model,
+            input=query,
+        )
+        query_embedding = query_embedding_response.data[0].embedding
+        strings_and_relatednesses = [
+            (row["text"], relatedness_fn(query_embedding, row["embedding"]))
+            for i, row in self.df.iterrows()
+        ]
+        strings_and_relatednesses.sort(key=lambda x: x[1], reverse=True)
+        strings, relatednesses = zip(*strings_and_relatednesses)
+        return strings[:top_n], relatednesses[:top_n]
+
+    def num_tokens(self, text: str) -> int:
+        """Return the number of tokens in a string."""
+        encoding = tiktoken.encoding_for_model(self.gpt_model)
+        return len(encoding.encode(text))
+
+    def query_message(
+        self,
+        query: str,
+        token_budget: int,
+        storage = None
+    ) -> str:
+        """Return a message for GPT, with relevant source texts pulled from a dataframe."""
+        articles = {}
+        if self.storage:
+            df = self.storage.get_pinecone_matches(query)
+            question = f"\n\nQuestion: {query}"
+            message = self.introduction
+            for k,v in df.iterrows():
+                string = v.content
+                title = v.title
+                url = v.url
+                articles[title] = url
+                next_article = f'\n\n{self.string_divider}\n"""\n{string}\n"""'
+                if (
+                    self.num_tokens(message + next_article + question)
+                    > token_budget
+                ):
+                    break
+                else:
+                    message += next_article
+        else:
+            strings, relatednesses = self.strings_ranked_by_relatedness(query)
+            question = f"\n\nQuestion: {query}"
+            message = self.introduction
+            for string in strings:
+                next_article = f'\n\n{self.string_divider}\n"""\n{string}\n"""'
+                if (
+                    self.num_tokens(message + next_article + question)
+                    > token_budget
+                ):
+                    break
+                else:
+                    message += next_article
+        return message + question, articles
+
+    def ask(
+        self,
+        query,
+        model = None,
+        token_budget: int = 4096 - 500
+    ):
+        """Answers a query using GPT and a dataframe of relevant texts and embeddings."""
+        if not model:
+            model = self.gpt_model
+        message, articles = self.query_message(query, token_budget=token_budget)
+        if self.debug:
+            print(message)
+        messages = [
+            {"role": "system", "content": "You answer questions about sustainable energy and other activities related to climate change and global warming."},
+            {"role": "user", "content": message},
+        ]
+        response = self.openai_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0
+        )
+        response_message = response.choices[0].message.content
+
+        references = "<p><b>For more information:</b></p><ul>"
+        for title, url in articles.items():
+            references += "<li><a href=\"" + url  + "\">" + title + "</a></li>"
+        references += "</ul>"
+
+        # print(response_message)
+        return response_message, references, articles
+
+
 if __name__ == "__main__":
     extractor = WikiExtractor()
     wiki_strings, urls = extractor.compile_wiki_strings()
@@ -785,35 +785,3 @@ if __name__ == "__main__":
     print(query_output)
     content_query_output = storage.query_article("Wipperdorf",'content')
     print(content_query_output)
-
-
-    # extractor = WikiExtractor(debug=True)
-    # wiki_strings, urls = extractor.compile_wiki_strings()
-    # openai_client = OpenAI(
-    #     organization='org-M7JuSsksoyQIdQOGaTgA2wkk',
-    #     project='proj_E0H6uUDUEkSZfn0jdmqy206G'
-    # )
-    #
-    # embedder = Embedder(openai_client, debug=True)
-    # df = embedder.compile_embeddings(wiki_strings, urls)
-    #
-    # storage = Storer(openai_client, df, overwrite_db = True, overwrite_pinecone = True, debug=True)
-    # query_output = storage.query_article('Clean Coal','content')
-    # print(query_output)
-    # content_query_output = storage.query_article("Wipperdorf",'content')
-    # print(content_query_output)
-
-
-# client = OpenAI(organization=organization, project=project)
-# site = mwclient.Site(WIKI_SITE)
-# gw = MediaWiki(url=url, user_agent=user_agent)
-# pinecone = Pinecone(api_key=pinecone_api_key)
-# wiki_strings, urls = compile_wiki_strings()
-# df = compile_embeddings(wiki_strings, urls)
-# upsert_data(df)
-
-# query_output = query_article('Clean Coal','content')
-# print(query_output)
-
-# content_query_output = query_article("Wipperdorf",'content')
-# print(content_query_output)
