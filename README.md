@@ -16,6 +16,8 @@ For testing the ChatGPT API
   * parses annotations in the reply
   * adds a function calling tool that lets the assistant create a quiz, submit it to the user, and grade the answers.
   * displays JSON of objects include the assistant, runs, threads, messages, run steps, responses
+* chattbotter.py: A class library for creating and running chatbots. Includes methods for compiling embeddings and database from Mediawiki sites.
+* social_data.py: A class library for creating and running chatbots using data from my databases of gmail and social media.
 * chat_completion.py: a very simple chat completion
 * completion_test.py: another very simple chat completion
 * embedding_gem_wiki: creates embeddings based on the first 10,000 articles in the GEM wiki (not the category: Wisconsin).
@@ -39,6 +41,8 @@ For testing the ChatGPT API
 * question_answering_wisconsin_sqlite.py: Answers questions with the embeddings created by embedding_gem_wisconsin.py. Uses the embeddings in Pinecone and uses sqlite to look up the article segments.
 * question_answering_wi_pinecone_sqlite_flask.py: Runs a Flask-powered chatbot that answers questions with the embeddings created by embedding_gem_wisconsin.py. Uses the embeddings in Pinecone and uses sqlite to look up the article segments.
 * quickstart.py: a very simple chat completion
+* shellbot.py: A test of the Shellbot (without the web UI)
+* shellbot_flask.py: A flask-powered Shellbot.
 * vision.py: a simple example of using the API to inspect an image from its URL and describe it
 * vision2.py: this time it encodes a local image and shares that via the API
 * vision3.py: uses the API to compare two different images
