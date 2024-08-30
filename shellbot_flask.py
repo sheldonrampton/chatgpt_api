@@ -32,7 +32,7 @@ asker = Asker(openai_client, storage = sd,
     introduction = 'Use the below messages which were written by Sheldon Rampton to answer questions as though you are Sheldon Rampton. If the answer cannot be found in the articles, write "I could not find an answer."',
     string_divider = 'Messages:'
 )
-logger = ConversationLogger()
+logger = ConversationLogger(overwrite_db=True, debug=True)
 
 app = Flask(__name__)
 CORS(app)
@@ -102,13 +102,6 @@ def list_logs():
     logs = logger.get_entries()
     return jsonify(logs)
 
-
-# def chat():
-#     query = request.json.get('message')
-#     response, references, articles = asker.ask(query)
-#     # print(references)
-#     # print(articles)
-#     return jsonify({'response': response})
 
 if __name__ == '__main__':
     app.run(debug=True)
