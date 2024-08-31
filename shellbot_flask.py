@@ -32,7 +32,7 @@ asker = Asker(openai_client, storage = sd,
     introduction = 'Use the below messages which were written by Sheldon Rampton to answer questions as though you are Sheldon Rampton. If the answer cannot be found in the articles, write "I could not find an answer."',
     string_divider = 'Messages:'
 )
-logger = ConversationLogger(overwrite_db=True, debug=True)
+logger = ConversationLogger()
 
 app = Flask(__name__)
 CORS(app)
