@@ -798,8 +798,8 @@ class ConversationLogger:
     def __init__(
         self,
         # db_path: str = "conversation_log.db",
-        db_host: str = "localhost",
-        db_port: str = "5432",
+        db_host = None,
+        db_port = None,
         db_user = None,
         db_password = None,
         logs_database_name = None,
@@ -809,8 +809,8 @@ class ConversationLogger:
         debug = False
 
     ) -> None:
-        self.db_host = db_host
-        self.db_port = db_port
+        self.db_host = db_host if db_host is not None else os.getenv('DB_HOST')
+        self.db_port = db_port if db_port is not None else os.getenv('DB_PORT')
         self.db_user = db_user if db_user is not None else os.getenv('POSTGRES_USER')
         self.db_password = db_password if db_password is not None else os.getenv('POSTGRES_DB_PASSWORD')
         self.logs_database_name = logs_database_name if logs_database_name is not None else os.getenv('SHELLBOT_DB_NAME')
