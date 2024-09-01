@@ -16,6 +16,7 @@ For testing the ChatGPT API
   * parses annotations in the reply
   * adds a function calling tool that lets the assistant create a quiz, submit it to the user, and grade the answers.
   * displays JSON of objects include the assistant, runs, threads, messages, run steps, responses
+* chapter_writer.py: A first stab at a chatbot script that writes an entire book chapter.
 * chattbotter.py: A class library for creating and running chatbots. Includes methods for compiling embeddings and database from Mediawiki sites.
 * social_data.py: A class library for creating and running chatbots using data from my databases of gmail and social media.
 * chat_completion.py: a very simple chat completion
