@@ -25,7 +25,11 @@ openai_client = OpenAI(
   organization='org-M7JuSsksoyQIdQOGaTgA2wkk',
   project='proj_E0H6uUDUEkSZfn0jdmqy206G',
 )
-sd = SocialData(openai_client)
+sd = SocialData(
+    openai_client,
+    knowledge_db_name = 'shellbot_knowledge',
+    pinecone_index_name = "shellbot-embeddings2",
+)
 sd.setup_pinecone()
 
 asker = Asker(openai_client, storage = sd,
